@@ -53,6 +53,7 @@ class HPOConfig:
     model: Any                           # チューニング対象モデル
     eval_fn: Callable[..., float]        # ユーザー定義評価関数
     n_trials: int                        # 総試行回数
+    param_space: ParamSpace | None = None  # 最適化対象パラメーター（None のとき adapter のデフォルト使用）
     prompts: dict[str, str] = field(default_factory=dict)  # エージェント別追加プロンプト
     llm_model: str | None = None         # LLM モデル名（.env 上書き用）
 ```
@@ -120,10 +121,11 @@ class TrialRecord:
     score: float
     tool_used: str
     timestamp: datetime
+    reasoning: str = ""  # AI の判断理由（Supervisor のツール選択理由 / ExpertAgentTool のパラメーター提案理由）
 ```
 
 **SOLIDチェック**
-- S: 1試行分の記録保持のみが責務
+- S: 1試行分の記録保持のみが責務（AI の判断理由も試行の一部として保持する）
 - O: カラム追加はフィールド追加のみで対応可能
 - D: データ保持クラスのため DIP 対象外
 
@@ -162,7 +164,8 @@ class SupervisorState(BaseModel):
     trial_records: list[TrialRecord]
     remaining_trials: int
     config: HPOConfig
-    current_report: str = ""  # 直近の中間レポート（ツール実行ごとに更新）
+    current_report: str = ""          # 直近の中間レポート（ツール実行ごとに更新）
+    last_tool_reasoning: str = ""     # 直前のツール選択理由（Supervisor が出力した理由）
 ```
 
 **SOLIDチェック**
@@ -573,6 +576,7 @@ classDiagram
         +model: Any
         +eval_fn: Callable
         +n_trials: int
+        +param_space: ParamSpace
         +prompts: dict
         +llm_model: str
     }
@@ -593,6 +597,7 @@ classDiagram
         +remaining_trials: int
         +config: HPOConfig
         +current_report: str
+        +last_tool_reasoning: str
     }
 
     class LLMProviderBase {
@@ -653,6 +658,7 @@ classDiagram
         +score: float
         +tool_used: str
         +timestamp: datetime
+        +reasoning: str
     }
 
     class HPOResult {
@@ -720,6 +726,8 @@ classDiagram
 | 項目 | 内容 | 対応するクラス / メソッド |
 |------|------|----------------------|
 | 試行番号の連番管理 | 複数ツールを跨いで `trial_id` が重複しないよう `SupervisorState` で採番を管理する | `Supervisor._build_graph()` |
+| パラメーター空間の優先順位 | `HPOConfig.param_space` が指定されている場合はアダプターのデフォルト空間を使用せず、ユーザー指定の `ParamSpace` を使用する | `HPOAgent._resolve_adapter()` |
+| AI 判断理由の記録 | Supervisor のツール選択理由は `SupervisorState.last_tool_reasoning` に保持し、`TrialRecord.reasoning` へ転記する。ExpertAgentTool のパラメーター提案理由は `TrialRecord.reasoning` に直接記録する | `Supervisor._build_graph()`, `ExpertAgentTool._run()` |
 | eval_fn のシグネチャ | `eval_fn(model, X, y) -> float` を基本とするが、将来的に任意引数を許容する設計にする | `ModelAdapterBase.evaluate()` |
 | プロンプト結合ルール | デフォルトシステムプロンプト + ユーザープロンプトを文字列連結で渡す。結合順序は必ずデフォストが先 | `Supervisor.__init__()`, `ExpertAgentTool.__init__()` |
 | LightGBM パラメータ空間 | MVP では `num_leaves`, `max_depth`, `learning_rate`, `n_estimators`, `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda` をデフォルト空間として定義する | `LightGBMAdapter.get_param_space()` |

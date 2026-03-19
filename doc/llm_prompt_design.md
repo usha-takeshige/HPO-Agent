@@ -119,10 +119,19 @@ def _build_system_prompt(default: str, user_addition: str | None) -> str:
 - スコアが全く改善しない場合は探索手法を切り替えることを検討する
 - 同じツールを連続して使い続けることが最善とは限らない
 
-## 出力に関する制約
+## ツール呼び出し前の出力
 
-- ツールの呼び出し以外の出力（ユーザーへのメッセージ等）は不要である
-- 試行結果の分析や戦略変更の理由は内部で思考し、最終的にツール呼び出しに変換すること
+ツールを呼び出す前に、以下の内容を必ず1〜3文で出力すること。この理由はレポートに記録される。
+
+- 今回どのツールを何回使うかの判断
+- そのツールを選んだ理由（現在の探索フェーズ・試行履歴の状況・スコア改善の見込み等）
+- 前回の試行から気づいた点（戦略変更がある場合）
+
+出力例：
+```
+試行実績が5件と少ないため、まずパラメーター空間を広くカバーするために sobol_search を10回実行します。
+初期フェーズでは均一なサンプリングが有効であり、ベイズ最適化に必要な情報を収集します。
+```
 ```
 
 ### 4-2. プロンプトの構成要素
@@ -133,7 +142,7 @@ def _build_system_prompt(default: str, user_addition: str | None) -> str:
 | ツール一覧と特性 | 各ツールをいつ使うべきかを LLM が判断できるようにする |
 | 基本戦略 | デフォルトの探索フェーズ遷移を示しつつ、柔軟性を残す |
 | 呼び出し時の注意 | 試行数超過・同一ツールの連続使用等のアンチパターンを防ぐ |
-| 出力制約 | ツール呼び出し以外の余分な出力を抑制する |
+| ツール呼び出し前の出力 | ツール選択理由を必ずテキストで出力させ、レポートに記録する |
 
 ---
 
@@ -168,24 +177,30 @@ def _build_system_prompt(default: str, user_addition: str | None) -> str:
 
 ## 出力形式
 
-思考の過程は出力せず、最終的なパラメータのみを以下の JSON 形式で出力すること。
-JSON 以外のテキスト（説明文・コードブロック記号等）を含めてはならない。
+以下の JSON 形式のみで出力すること。JSON 以外のテキスト（説明文・コードブロック記号等）を含めてはならない。
+`reasoning` フィールドには提案の根拠を必ず記載すること。この内容はレポートに記録される。
 
 {
-  "パラメータ名": 値,
-  "パラメータ名": 値
+  "reasoning": "提案の根拠（試行履歴の分析結果・選択の判断理由を1〜3文で記述）",
+  "params": {
+    "パラメータ名": 値,
+    "パラメータ名": 値
+  }
 }
 
 出力例（LightGBM の場合）:
 {
-  "num_leaves": 64,
-  "max_depth": 6,
-  "learning_rate": 0.05,
-  "n_estimators": 300,
-  "subsample": 0.8,
-  "colsample_bytree": 0.7,
-  "reg_alpha": 0.01,
-  "reg_lambda": 1.0
+  "reasoning": "スコア上位の試行では learning_rate が 0.05 前後で num_leaves が 64〜128 の組み合わせが多い。reg_lambda を高めに設定することで過学習を抑制しつつ、未探索の subsample=0.75 付近を試みる。",
+  "params": {
+    "num_leaves": 96,
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "n_estimators": 400,
+    "subsample": 0.75,
+    "colsample_bytree": 0.7,
+    "reg_alpha": 0.01,
+    "reg_lambda": 2.0
+  }
 }
 ```
 
@@ -196,7 +211,7 @@ JSON 以外のテキスト（説明文・コードブロック記号等）を含
 | 役割定義 | 専門家としての分析的な思考を促す |
 | 思考手順（CoT） | 試行履歴の解釈プロセスを段階化し、質の高い提案を引き出す |
 | パラメータ空間の制約 | 型違反・範囲外・重複提案を防ぐ |
-| 出力形式 | JSON 単体の出力に厳密に制約し、パースエラーを防ぐ |
+| 出力形式 | `reasoning` + `params` を持つ JSON に制約し、提案理由を必ず記録させる |
 
 ---
 
@@ -228,6 +243,7 @@ flowchart TD
 |------|------|---------|
 | プロンプトの保守性 | デフォルトプロンプトはソースコード内に文字列定数として定義し、バージョン管理する | `src/hpo_agent/prompts.py`（定数ファイルを分離） |
 | JSON パースの堅牢性 | ExpertAgentTool の LLM 出力が JSON として不正な場合は再試行（最大3回）する。3回失敗時は例外を送出する | `ExpertAgentTool._run()` |
+| reasoning の抽出 | ExpertAgentTool は JSON の `reasoning` フィールドを `TrialRecord.reasoning` に格納する。Supervisor のツール選択理由はツール呼び出し前のメッセージテキストから抽出して `SupervisorState.last_tool_reasoning` に保存する | `ExpertAgentTool._run()`, `Supervisor._build_graph()` |
 | 試行履歴の渡し方 | ExpertAgentTool へ渡す試行履歴は `TrialRecord` のリストを JSON 文字列に変換してプロンプトに埋め込む | `ExpertAgentTool._run()` |
 | LLM の温度設定 | Supervisor は `temperature=0`（決定的な判断を優先）、ExpertAgentTool は `temperature=0.3`（適度な多様性を持たせた提案）とする | `GoogleLLMProvider.get_llm()` |
 | トークン数の考慮 | 試行履歴が多くなるとプロンプトが長くなるため、ExpertAgentTool へ渡す履歴は **スコア上位20件 + 直近10件** に絞る | `ExpertAgentTool._run()` |

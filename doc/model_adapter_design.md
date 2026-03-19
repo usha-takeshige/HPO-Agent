@@ -73,8 +73,8 @@ class ParamSpace:
 ```python
 class ModelAdapterBase(ABC):
     @abstractmethod
-    def get_param_space(self) -> ParamSpace:
-        """モデル固有のデフォルトパラメータ空間を返す。"""
+    def get_default_param_space(self) -> ParamSpace:
+        """モデル固有のデフォルトパラメータ空間を返す。HPOConfig.param_space が未指定のときに使用される。"""
         ...
 
     @abstractmethod
@@ -83,9 +83,22 @@ class ModelAdapterBase(ABC):
         ...
 ```
 
+#### パラメーター空間の決定ルール
+
+ツールが実際に使用する `ParamSpace` は以下の優先順位で決定する。
+
+```
+HPOConfig.param_space が指定されている
+    → ユーザー指定の ParamSpace を使用（アダプターのデフォルトは無視）
+HPOConfig.param_space が None（未指定）
+    → ModelAdapterBase.get_default_param_space() の返り値を使用
+```
+
+この解決は `HPOAgent._resolve_adapter()` で行い、決定した `ParamSpace` をツールに渡す。
+
 #### `evaluate()` の契約
 
-- `params` は `get_param_space()` の `ParamSpec.name` をキーとする辞書
+- `params` は使用される `ParamSpace` の `ParamSpec.name` をキーとする辞書
 - 戻り値は **大きいほど良いスコア**（損失関数の場合は呼び出し側で符号反転する）
 - モデルオブジェクトを破壊しない（内部でディープコピーを行う）
 - 例外が発生した場合はそのまま伝播させる（ツール側でハンドリングする）
@@ -106,7 +119,7 @@ class LightGBMAdapter(ModelAdapterBase):
         y: Any,
     ) -> None: ...
 
-    def get_param_space(self) -> ParamSpace: ...
+    def get_default_param_space(self) -> ParamSpace: ...
     def evaluate(self, params: dict[str, Any]) -> float: ...
 ```
 
@@ -202,15 +215,20 @@ class PyTorchAdapter(ModelAdapterBase):
 
 ## 6. アダプターの解決方法
 
-`HPOAgent._resolve_adapter()` がモデルオブジェクトの型を検査し、適切なアダプターを返す。
+`HPOAgent._resolve_adapter()` がモデルオブジェクトの型を検査し、適切なアダプターと使用する `ParamSpace` を決定して返す。
 
 ```python
-def _resolve_adapter(self) -> ModelAdapterBase:
+def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace]:
     model = self._config.model
     if isinstance(model, lgb.LGBMModel):
-        return LightGBMAdapter(model, self._config.eval_fn, ...)
-    # 将来拡張：sklearn / PyTorch
-    raise TypeError(f"Unsupported model type: {type(model)}")
+        adapter = LightGBMAdapter(model, self._config.eval_fn, ...)
+    else:
+        # 将来拡張：sklearn / PyTorch
+        raise TypeError(f"Unsupported model type: {type(model)}")
+
+    # ユーザー指定の param_space を優先。未指定の場合はアダプターのデフォルトを使用
+    param_space = self._config.param_space or adapter.get_default_param_space()
+    return adapter, param_space
 ```
 
 ### モデル型とアダプターの対応表
@@ -229,7 +247,7 @@ def _resolve_adapter(self) -> ModelAdapterBase:
 classDiagram
     class ModelAdapterBase {
         <<abstract>>
-        +get_param_space() ParamSpace
+        +get_default_param_space() ParamSpace
         +evaluate(params: dict) float
     }
 
