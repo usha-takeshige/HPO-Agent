@@ -237,13 +237,149 @@ flowchart TD
 
 ---
 
-## 7. 実装上の注意点
+## 7. 試行履歴のプロンプトへの注入設計
+
+スーパーバイザーとエキスパートエージェントでは、試行履歴のプロンプトへの渡し方が根本的に異なる。
+
+| エージェント | 履歴の渡し方 | 理由 |
+|------------|------------|------|
+| スーパーバイザー | LangGraph のメッセージ履歴として自動蓄積 | 会話型エージェントのため、ツール実行結果が `ToolMessage` として messages に追加される |
+| エキスパートエージェント | ユーザーメッセージとして JSON を明示的に埋め込む | 毎回新規呼び出し（会話履歴なし）のため、試行履歴を自分で構築して渡す必要がある |
+
+---
+
+### 7-1. スーパーバイザーへの履歴注入
+
+#### メカニズム
+
+LangGraph の `messages` フィールドに全会話履歴が蓄積される。Supervisor LLM はこの履歴を入力として受け取るため、**過去のツール呼び出しと結果がそのまま文脈として機能する**。
+
+```
+SupervisorState.messages の蓄積イメージ:
+  [0] SystemMessage    … システムプロンプト
+  [1] AIMessage        … 「sobol_search を10回実行します。理由は...」（ツール呼び出し前の説明）
+  [2] ToolMessage      … sobol_search の実行結果（試行結果サマリー）
+  [3] AIMessage        … 「試行実績が10件になったため、bayesian_optimization に切り替えます。」
+  [4] ToolMessage      … bayesian_optimization の実行結果
+  ...
+```
+
+#### ToolMessage のフォーマット
+
+各ツールが返す `ToolMessage.content` は以下のテキスト形式とする。LLM がそのまま読んで次の判断に使えるよう、簡潔な構造化テキストで渡す。
+
+```
+ツール: sobol_search
+実行試行数: 10
+今回の最良スコア: 0.8712（params: {num_leaves: 64, learning_rate: 0.05, ...}）
+全体最良スコア: 0.8712
+残り試行数: 40
+```
+
+#### 設計上の注意
+
+- LLM に渡される `messages` が長くなるほどトークン数が増加する
+- MVP では全履歴を渡す（最大コンテキスト長に依存）
+- 将来的にトークン数が問題になる場合、古い `ToolMessage` を要約 `AIMessage` に置き換える圧縮戦略を検討する
+
+---
+
+### 7-2. エキスパートエージェントへの履歴注入
+
+#### メカニズム
+
+`ExpertAgentTool._run()` が呼ばれるたびに、`trial_history` から履歴を選択・シリアライズして**ユーザーメッセージに直接埋め込む**。
+
+```python
+# ExpertAgentTool._run() 内の実装イメージ
+def _run(self, n_trials: int, trial_history: list[TrialRecord]) -> list[TrialRecord]:
+    selected = self._select_history(trial_history)
+    history_json = json.dumps([record.to_dict() for record in selected], ensure_ascii=False)
+    user_message = self._build_user_message(history_json)
+    # LLM に1件ずつ提案を依頼するループ
+    ...
+```
+
+#### 履歴の選択戦略
+
+トークン数を抑えつつ、LLM に有効な情報を渡すため以下の戦略で履歴を絞り込む。
+
+```
+1. trial_history をスコアの降順にソートし、上位20件を取得
+2. trial_history を時系列順にソートし、直近10件を取得
+3. 上記2つの和集合を取り（trial_id で重複排除）、試行番号昇順に並べ替えて渡す
+```
+
+最大件数の目安：重複を考慮すると最大30件。
+
+#### ユーザーメッセージのテンプレート
+
+```
+以下はこれまでの試行履歴です。この履歴を分析して、次のパラメータを提案してください。
+
+## パラメータ空間の制約
+
+{param_space_description}
+
+## 試行履歴
+
+{history_json}
+```
+
+`param_space_description` は `ParamSpace` から生成するテキスト（各 `ParamSpec` の名前・型・範囲）。
+
+#### 試行履歴の JSON フォーマット
+
+```json
+[
+  {
+    "trial_id": 1,
+    "params": {"num_leaves": 64, "learning_rate": 0.05, "n_estimators": 200},
+    "score": 0.8712,
+    "tool_used": "sobol_search",
+    "reasoning": ""
+  },
+  {
+    "trial_id": 5,
+    "params": {"num_leaves": 128, "learning_rate": 0.01, "n_estimators": 500},
+    "score": 0.8934,
+    "tool_used": "bayesian_optimization",
+    "reasoning": ""
+  }
+]
+```
+
+| フィールド | 型 | 説明 |
+|----------|-----|------|
+| `trial_id` | int | 試行番号（全体で連番） |
+| `params` | dict | 試行したパラメータ（`ParamSpec.name` をキーとする） |
+| `score` | float | `eval_fn` が返したスコア（大きいほど良い） |
+| `tool_used` | str | 使用したツール名 |
+| `reasoning` | str | ExpertAgentTool が提案した場合はその根拠（他ツールでは空文字列） |
+
+---
+
+### 7-3. パラメータ空間の記述フォーマット
+
+エキスパートエージェントへ渡す `param_space_description` は、`ParamSpace` から以下のように生成する。
+
+```
+- num_leaves: int, 範囲 [20, 300], 線形スケール
+- learning_rate: float, 範囲 [0.0001, 0.3], 対数スケール
+- boosting_type: categorical, 選択肢 ["gbdt", "dart", "goss"]
+```
+
+LLM が各パラメータの制約を正確に把握できるよう、型・範囲・スケールをすべて含める。
+
+---
+
+## 8. 実装上の注意点
 
 | 項目 | 内容 | 対応箇所 |
 |------|------|---------|
 | プロンプトの保守性 | デフォルトプロンプトはソースコード内に文字列定数として定義し、バージョン管理する | `src/hpo_agent/prompts.py`（定数ファイルを分離） |
 | JSON パースの堅牢性 | ExpertAgentTool の LLM 出力が JSON として不正な場合は再試行（最大3回）する。3回失敗時は例外を送出する | `ExpertAgentTool._run()` |
 | reasoning の抽出 | ExpertAgentTool は JSON の `reasoning` フィールドを `TrialRecord.reasoning` に格納する。Supervisor のツール選択理由はツール呼び出し前のメッセージテキストから抽出して `SupervisorState.last_tool_reasoning` に保存する | `ExpertAgentTool._run()`, `Supervisor._build_graph()` |
-| 試行履歴の渡し方 | ExpertAgentTool へ渡す試行履歴は `TrialRecord` のリストを JSON 文字列に変換してプロンプトに埋め込む | `ExpertAgentTool._run()` |
+| 試行履歴の渡し方 | Supervisor は LangGraph の `messages` に自動蓄積される `ToolMessage` 経由で履歴を参照する。ExpertAgentTool は `TrialRecord` のリストを選択・シリアライズしてユーザーメッセージに埋め込む（§7 参照） | `ExpertAgentTool._run()`, `Supervisor._build_graph()` |
 | LLM の温度設定 | Supervisor は `temperature=0`（決定的な判断を優先）、ExpertAgentTool は `temperature=0.3`（適度な多様性を持たせた提案）とする | `GoogleLLMProvider.get_llm()` |
-| トークン数の考慮 | 試行履歴が多くなるとプロンプトが長くなるため、ExpertAgentTool へ渡す履歴は **スコア上位20件 + 直近10件** に絞る | `ExpertAgentTool._run()` |
+| トークン数の考慮 | 試行履歴が多くなるとプロンプトが長くなるため、ExpertAgentTool へ渡す履歴は **スコア上位20件 + 直近10件** に絞る（§7-2 参照） | `ExpertAgentTool._run()` |
