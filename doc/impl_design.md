@@ -19,7 +19,7 @@
 
 | クラス名 | 種別 | 責務（単一責任の原則） | 対応する要件の概念 |
 |---------|------|---------------------|-----------------|
-| `HPOConfig` | データクラス（frozen） | エージェント実行に必要な設定値を保持する | 3.2 入力パラメータ |
+| `HPOConfig` | データクラス（frozen） | エージェント実行に必要な設定値（乱数シード含む）を保持する | 3.2 入力パラメータ |
 | `ParamSpec` | データクラス（frozen） | 1つのハイパーパラメータの型・範囲・スケールを保持する | モデルアダプターのパラメータ空間定義 |
 | `ParamSpace` | データクラス（frozen） | パラメータ仕様の集合を保持する | モデルアダプターのパラメータ空間定義 |
 | `TrialRecord` | データクラス | 1回の試行結果を保持する | 6.1 試行履歴テーブル |
@@ -54,6 +54,7 @@ class HPOConfig:
     eval_fn: Callable[..., float]        # ユーザー定義評価関数
     n_trials: int                        # 総試行回数
     param_space: ParamSpace | None = None  # 最適化対象パラメーター（None のとき adapter のデフォルト使用）
+    seed: int | None = None              # 乱数シード（None のとき非決定的）
     prompts: dict[str, str] = field(default_factory=dict)  # エージェント別追加プロンプト
     llm_model: str | None = None         # LLM モデル名（.env 上書き用）
 ```
@@ -110,7 +111,7 @@ class ParamSpace:
 #### `TrialRecord`
 
 **種別**：データクラス（mutable）
-**責務**：1回の試行結果（パラメータ・スコア・ツール名・日時）を保持する
+**責務**：1回の試行結果（パラメータ・スコア・ツール名・日時・実行時間・AI 判断理由）を保持する
 **対応する要件の概念**：6.1 試行履歴テーブル
 
 ```python
@@ -121,11 +122,13 @@ class TrialRecord:
     score: float
     tool_used: str
     timestamp: datetime
-    reasoning: str = ""  # AI の判断理由（Supervisor のツール選択理由 / ExpertAgentTool のパラメーター提案理由）
+    eval_duration: float = 0.0   # モデルの学習・評価にかかった時間（秒、time.perf_counter で計測）
+    algo_duration: float = 0.0   # アルゴリズムが次の実験点を算出するのにかかった時間（秒）
+    reasoning: str = ""          # AI の判断理由（Supervisor のツール選択理由 / ExpertAgentTool のパラメーター提案理由）
 ```
 
 **SOLIDチェック**
-- S: 1試行分の記録保持のみが責務（AI の判断理由も試行の一部として保持する）
+- S: 1試行分の記録保持のみが責務（時間計測結果・AI 判断理由も試行の一部として保持する）
 - O: カラム追加はフィールド追加のみで対応可能
 - D: データ保持クラスのため DIP 対象外
 
@@ -658,6 +661,8 @@ classDiagram
         +score: float
         +tool_used: str
         +timestamp: datetime
+        +eval_duration: float
+        +algo_duration: float
         +reasoning: str
     }
 
@@ -732,7 +737,11 @@ classDiagram
 | プロンプト結合ルール | デフォルトシステムプロンプト + ユーザープロンプトを文字列連結で渡す。結合順序は必ずデフォストが先 | `Supervisor.__init__()`, `ExpertAgentTool.__init__()` |
 | LightGBM パラメータ空間 | MVP では `num_leaves`, `max_depth`, `learning_rate`, `n_estimators`, `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda` をデフォルト空間として定義する | `LightGBMAdapter.get_param_space()` |
 | 同期実行の保証 | `HPOAgent.run()` は同期ブロッキングとする。LangGraph の非同期 API は使用しない（将来拡張への考慮のみ） | `HPOAgent.run()` |
-| ログ出力 | 各ツールの `_run()` 内で試行番号・スコア・ツール名を `logging.INFO` で出力する | `HPOToolBase._run()` |
+| ログ出力 | 各試行の実行後に試行番号・スコア・評価時間・アルゴリズム計算時間を `logging.DEBUG` で出力する。ツール完了時にはツール名・合計実行時間を `logging.INFO` で出力する | `HPOToolBase._run()` |
 | 中間レポートの出力タイミング | ツール実行が完了し `SupervisorState` が更新されたタイミングで `_report_progress()` を呼び出す。LLM を使用しないため低コスト | `Supervisor._report_progress()` |
 | 中間レポートと最終レポートの違い | 中間レポートは現時点の統計サマリーのみ（LLM なし）。最終レポートのみ AI による考察・推薦コメントを含む（LLM あり） | `ReportGenerator.generate_intermediate()` / `generate_final()` |
 | モデルのディープコピー | 複数試行で同一モデルオブジェクトを汚染しないよう、評価前に `copy.deepcopy(model)` を行う | `ModelAdapterBase.evaluate()` |
+| 時間計測の方法 | `time.perf_counter()` を使用して `algo_duration`（アルゴリズムの提案計算時間）と `eval_duration`（モデル評価時間）を別々に計測し、`TrialRecord` に記録する。`datetime.now()` は壁時計時刻（`timestamp` 用）、`time.perf_counter()` は高精度な経過時間計測に使用する | `HPOToolBase._run()`, `ModelAdapterBase.evaluate()` |
+| 乱数シードの伝播 | `HPOConfig.seed` を各コンポーネントに渡す。`BayesianOptimizationTool` は `TPESampler(seed=seed)`、`SobolSearchTool` は `Sobol(seed=seed)` に渡す。`seed=None` の場合は各ライブラリのデフォルト（非決定的）動作に従う | `BayesianOptimizationTool._run()`, `SobolSearchTool._run()` |
+| シードと LLM の再現性 | `ExpertAgentTool` は LLM 呼び出しを伴うため、`seed` を指定しても LLM の出力は完全には再現されない（`temperature=0.3` の確率的挙動による）。この制約をレポートのヘッダーに明記する | `ReportGenerator.generate_final()` |
+| シードのレポート記載 | 使用した `seed` 値（`None` を含む）をレポートのメタ情報セクションに記載し、後から同じ条件で実行できるよう補助する | `ReportGenerator.generate_intermediate()`, `generate_final()` |
