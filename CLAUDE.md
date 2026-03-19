@@ -125,10 +125,17 @@ uv run python <script.py>
 ## Directory Structure
 ```
 HPO-Agent/
-├── src/hpo-agent/  # パッケージソースコード
-├── example/  # 使用例コード
-├── test/  # テストコード
-├── data/  # データ置き場
-└── doc/
-   　└── requirements.md      # 要件定義書
+├── src/hpo_agent/       # パッケージソースコード
+├── example/             # 使用例コード
+├── test/                # テストコード
+├── doc/
+│   ├── requirements.md          # 要件定義書
+│   ├── impl_design.md           # 実装設計書
+│   ├── model_adapter_design.md  # モデルアダプター設計書
+│   ├── llm_prompt_design.md     # LLM プロンプト設計書
+│   └── test_design.md           # テスト設計書
+├── .github/workflows/   # GitHub Actions CI 設定
+├── .env.example         # 環境変数テンプレート
+├── pyproject.toml       # プロジェクト設定・依存関係
+└── README.md            # ユーザー向けドキュメント
 ```
