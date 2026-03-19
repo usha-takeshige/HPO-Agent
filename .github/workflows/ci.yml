@@ -41,6 +41,8 @@ jobs:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -53,5 +55,35 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      - name: Detect changed Python files
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git show --name-only --format="" HEAD)
+          fi
+          echo "Changed files:"
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^(src|test)/.*\.py'; then
+            echo "run_tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "run_tests=false" >> $GITHUB_OUTPUT
+            echo "No Python source/test changes detected, skipping tests."
+          fi
+
+      - name: Check for test files
+        id: test_files
+        if: steps.changes.outputs.run_tests == 'true'
+        run: |
+          TEST_COUNT=$(find test \( -name "test_*.py" -o -name "*_test.py" \) | wc -l)
+          if [ "$TEST_COUNT" -gt 0 ]; then
+            echo "has_tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_tests=false" >> $GITHUB_OUTPUT
+            echo "No test files found in test/, skipping pytest."
+          fi
+
       - name: pytest
+        if: steps.changes.outputs.run_tests == 'true' && steps.test_files.outputs.has_tests == 'true'
         run: uv run pytest
