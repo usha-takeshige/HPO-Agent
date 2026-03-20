@@ -288,9 +288,15 @@ class ExpertAgentTool(HPOToolBase):
                     ]
                 )
                 try:
-                    parsed = json.loads(response.content)
+                    content = response.content
+                    if isinstance(content, list):
+                        content = "".join(
+                            b.get("text", "") if isinstance(b, dict) else str(b)
+                            for b in content
+                        )
+                    parsed = json.loads(content)
                     break
-                except (json.JSONDecodeError, ValueError):
+                except (json.JSONDecodeError, ValueError, TypeError):
                     if attempt == self._MAX_RETRIES - 1:
                         raise RuntimeError(
                             f"ExpertAgentTool: {self._MAX_RETRIES} 回連続で JSON の解析に失敗しました。"
