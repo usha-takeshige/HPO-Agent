@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from abc import abstractmethod
 from datetime import datetime
@@ -294,6 +295,10 @@ class ExpertAgentTool(HPOToolBase):
                             b.get("text", "") if isinstance(b, dict) else str(b)
                             for b in content
                         )
+                    # マークダウンコードブロックを除去（Gemini が ```json ... ``` で囲む場合）
+                    content = re.sub(
+                        r"^```(?:json)?\s*|\s*```$", "", content.strip()
+                    ).strip()
                     parsed = json.loads(content)
                     break
                 except (json.JSONDecodeError, ValueError, TypeError):
