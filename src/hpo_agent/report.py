@@ -24,6 +24,7 @@ class ReportGenerator:
         seed: int | None = None,
         tool_reasoning: str = "",
         current_tool_records: list[TrialRecord] | None = None,
+        title: str = "# HPO 中間レポート",
     ) -> str:
         """中間レポートを生成する（LLM 不要）。
 
@@ -34,6 +35,7 @@ class ReportGenerator:
             seed: 乱数シード。
             tool_reasoning: Supervisor が今回のツールを選択した理由。
             current_tool_records: 今回のツール実行で得た TrialRecord リスト。
+            title: レポートの見出し（最終レポートでは "# HPO 最終レポート" を渡す）。
 
         Returns:
             Markdown 形式のレポート文字列。
@@ -54,7 +56,7 @@ class ReportGenerator:
         )
 
         lines = [
-            "# HPO 中間レポート",
+            title,
             "",
             "## メタ情報",
             f"- 実行日時: {now}",
@@ -139,6 +141,7 @@ class ReportGenerator:
             best_params=best_params,
             best_score=best_score,
             seed=seed,
+            title="# HPO 最終レポート",
         )
 
         # 各ステップでの AI 判断理由の記録
@@ -184,5 +187,11 @@ class ReportGenerator:
                 HumanMessage(content=prompt),
             ]
         )
-        ai_section = f"\n\n## AI考察\n\n{response.content}"
+        ai_content = response.content
+        if isinstance(ai_content, list):
+            ai_content = "".join(
+                b.get("text", "") if isinstance(b, dict) else str(b)
+                for b in ai_content
+            )
+        ai_section = f"\n\n## AI考察\n\n{ai_content}"
         return full_report + ai_section

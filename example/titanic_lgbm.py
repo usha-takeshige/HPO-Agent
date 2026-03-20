@@ -120,9 +120,7 @@ def main() -> None:
     print(f"最良パラメータ: {result.best_params}\n")
 
     # 最良パラメータで再学習してバリデーション精度を確認
-    best_model = lgb.LGBMClassifier(
-        verbosity=-1, n_estimators=100, **result.best_params
-    )
+    best_model = lgb.LGBMClassifier(verbosity=-1, **result.best_params)
     best_model.fit(X_train, y_train)
     val_acc = accuracy_score(y_val, best_model.predict(X_val))
     print(f"バリデーション精度: {val_acc:.4f}\n")

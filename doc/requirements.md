@@ -76,6 +76,8 @@ print(result.best_params)     # 最良パラメータ
 | パラメータ | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `model` | `Any` | Yes | チューニング対象のモデルオブジェクト |
+| `X` | `Any` | Yes | 学習に使用する特徴量データ |
+| `y` | `Any` | Yes | 学習に使用するターゲットデータ |
 | `eval_fn` | `Callable` | Yes | ユーザー定義の評価関数。スコア（float）を返す |
 | `n_trials` | `int` | Yes | HPO の総試行回数 |
 | `param_space` | `ParamSpace` | No | 最適化対象のハイパーパラメーターを指定する。指定がない場合はモデルアダプターのデフォルト空間を使用する |

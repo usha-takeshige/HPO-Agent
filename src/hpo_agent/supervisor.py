@@ -92,7 +92,13 @@ class Supervisor:
         """LLM を呼び出してツール選択を決定するノード。"""
         llm_with_tools = self._llm.bind_tools(self._tools)
         response: AIMessage = llm_with_tools.invoke(state.messages)
-        reasoning = response.content if isinstance(response.content, str) else ""
+        _content = response.content
+        if isinstance(_content, list):
+            _content = "".join(
+                b.get("text", "") if isinstance(b, dict) else str(b)
+                for b in _content
+            )
+        reasoning = _content if isinstance(_content, str) else ""
         return {
             "messages": [response],
             "last_tool_reasoning": reasoning,
