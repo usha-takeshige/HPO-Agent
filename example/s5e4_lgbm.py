@@ -170,12 +170,17 @@ def main() -> None:
     print(f"最良 CV RMSE: {best_rmse:.4f}")
     print(f"最良パラメータ: {result.best_params}\n")
 
-    # 試行履歴
+    # 試行履歴 CSV 出力
+    csv_path = pathlib.Path(__file__).parent / "s5e4_trials.csv"
+    output_df = result.trials_df.copy()
+    if "score" in output_df.columns:
+        output_df["cv_rmse"] = -output_df["score"]
+    output_df.to_csv(csv_path, index=False, encoding="utf-8")
+    print(f"試行履歴を保存しました: {csv_path}\n")
+
+    # 試行履歴（先頭 5 件をターミナルにも表示）
     print("=== 試行履歴（先頭 5 件）===")
-    display_df = result.trials_df.copy()
-    if "score" in display_df.columns:
-        display_df["cv_rmse"] = -display_df["score"]
-    print(display_df.head())
+    print(output_df.head())
 
     # Markdown レポート
     print("\n=== レポート ===")
