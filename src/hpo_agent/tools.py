@@ -286,16 +286,20 @@ class ExpertAgentTool(HPOToolBase):
         """LLM からパラメータ提案を受け取って評価する。"""
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        selected_history = self._select_history(trial_history)
-        history_json = json.dumps(
-            [r.to_dict() for r in selected_history],
-            ensure_ascii=False,
-        )
         param_space_desc = self._build_param_space_description()
-        user_message = self._build_user_message(history_json, param_space_desc)
+        # ループ内で更新するため mutable なリストとして保持
+        current_history = list(trial_history)
 
         records: list[TrialRecord] = []
         for i in range(n_trials):
+            # 試行ごとに最新の履歴でメッセージを再構築
+            selected_history = self._select_history(current_history)
+            history_json = json.dumps(
+                [r.to_dict() for r in selected_history],
+                ensure_ascii=False,
+            )
+            user_message = self._build_user_message(history_json, param_space_desc)
+
             algo_start = time.perf_counter()
             parsed: dict[str, Any] | None = None
             for attempt in range(self._MAX_RETRIES):
@@ -334,18 +338,18 @@ class ExpertAgentTool(HPOToolBase):
             score = self.adapter.evaluate(params)
             eval_duration = time.perf_counter() - eval_start
 
-            records.append(
-                TrialRecord(
-                    trial_id=i,
-                    params=params,
-                    score=score,
-                    tool_used="expert_agent",
-                    timestamp=datetime.now(),
-                    eval_duration=eval_duration,
-                    algo_duration=algo_duration,
-                    reasoning=reasoning,
-                )
+            new_record = TrialRecord(
+                trial_id=i,
+                params=params,
+                score=score,
+                tool_used="expert_agent",
+                timestamp=datetime.now(),
+                eval_duration=eval_duration,
+                algo_duration=algo_duration,
+                reasoning=reasoning,
             )
+            records.append(new_record)
+            current_history.append(new_record)
             logger.info(
                 "[expert_agent] trial=%d | score=%.6f | eval=%.2fs | params=%s",
                 i,
