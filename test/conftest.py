@@ -100,6 +100,7 @@ def mock_supervisor_llm() -> MagicMock:
             ],
         ),
         AIMessage(content="最適化完了。", tool_calls=[]),
+        MagicMock(content="AI 考察: 最適化結果を分析しました。"),  # generate_final() 用
     ]
     return llm
 

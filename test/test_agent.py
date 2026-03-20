@@ -148,6 +148,7 @@ class TestSupervisorLoop:
                 ],
             ),
             AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),  # generate_final() 用
         ]
         result = _run_with_mock(
             n_trials=5,
@@ -180,6 +181,7 @@ class TestSupervisorLoop:
                 ],
             ),
             AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),  # generate_final() 用
         ]
 
         config = HPOConfig(
@@ -251,6 +253,7 @@ class TestSupervisorLoop:
                 ],
             ),
             AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),  # generate_final() 用
         ]
         _run_with_mock(
             n_trials=5,
@@ -369,6 +372,7 @@ class TestHistoryPassthrough:
                 ],
             ),
             AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),  # generate_final() 用
         ]
 
         config = HPOConfig(

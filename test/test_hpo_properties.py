@@ -61,6 +61,7 @@ def _run_supervisor_with_sobol(
             ],
         ),
         AIMessage(content="完了", tool_calls=[]),
+        MagicMock(content="AI 考察テキスト"),  # generate_final() 用
     ]
 
     config = HPOConfig(

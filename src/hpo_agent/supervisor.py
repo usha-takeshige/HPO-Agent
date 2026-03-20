@@ -147,6 +147,8 @@ class Supervisor:
             best_params=best_params,
             best_score=best_score,
             seed=state.config.seed,
+            tool_reasoning=state.last_tool_reasoning,
+            current_tool_records=new_records,
         )
         logger.info(
             "Tool '%s' completed (%d trials). Best score: %.6f\n%s",
@@ -206,9 +208,17 @@ class Supervisor:
         else:
             trials_df = pd.DataFrame()
 
+        final_report = self._report_generator.generate_final(
+            trial_records=trial_records,
+            best_params=best_params,
+            best_score=best_score,
+            llm=self._llm,
+            seed=config.seed,
+        )
+
         return HPOResult(
             best_params=best_params,
             best_score=best_score,
             trials_df=trials_df,
-            report=current_report,
+            report=final_report,
         )
