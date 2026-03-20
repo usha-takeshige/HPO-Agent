@@ -6,7 +6,7 @@ import logging
 from typing import Any, Literal
 
 import pandas as pd
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
 from hpo_agent.models import HPOConfig, HPOResult, TrialRecord
@@ -55,7 +55,16 @@ class Supervisor:
         """
         graph = self._build_graph()
         initial_state = SupervisorState(
-            messages=[SystemMessage(content=self._system_prompt)],
+            messages=[
+                SystemMessage(content=self._system_prompt),
+                HumanMessage(
+                    content=(
+                        f"ハイパーパラメーター最適化を開始してください。"
+                        f"総試行回数: {config.n_trials} 回。"
+                        f"利用可能なツールを選択して最適化を進めてください。"
+                    )
+                ),
+            ],
             trial_records=[],
             remaining_trials=config.n_trials,
             config=config,
