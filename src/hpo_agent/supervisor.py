@@ -165,7 +165,10 @@ class Supervisor:
         )
 
         tool_message = ToolMessage(
-            content=f"{tool_name}: {len(new_records)} trials completed. Best score: {best_score:.6f}",
+            content=(
+                f"{tool_name}: {len(new_records)} trials completed. "
+                f"Best score: {best_score:.6f}\n\n{report}"
+            ),
             tool_call_id=tool_call_id,
         )
 

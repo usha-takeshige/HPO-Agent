@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from abc import abstractmethod
 from datetime import datetime
 from math import exp, log
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import optuna
@@ -132,6 +135,13 @@ class SobolSearchTool(HPOToolBase):
                     algo_duration=algo_duration,
                 )
             )
+            logger.info(
+                "[sobol_search] trial=%d | score=%.6f | eval=%.2fs | params=%s",
+                i,
+                score,
+                eval_duration,
+                params,
+            )
 
         return records
 
@@ -207,6 +217,13 @@ class BayesianOptimizationTool(HPOToolBase):
                     eval_duration=eval_duration,
                     algo_duration=algo_duration,
                 )
+            )
+            logger.info(
+                "[bayesian_optimization] trial=%d | score=%.6f | eval=%.2fs | params=%s",
+                i,
+                score,
+                eval_duration,
+                suggested_params,
             )
 
         return records
@@ -328,6 +345,13 @@ class ExpertAgentTool(HPOToolBase):
                     algo_duration=algo_duration,
                     reasoning=reasoning,
                 )
+            )
+            logger.info(
+                "[expert_agent] trial=%d | score=%.6f | eval=%.2fs | params=%s",
+                i,
+                score,
+                eval_duration,
+                params,
             )
 
         return records
