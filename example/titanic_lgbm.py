@@ -127,6 +127,15 @@ def main() -> None:
     val_acc = accuracy_score(y_val, best_model.predict(X_val))
     print(f"バリデーション精度: {val_acc:.4f}\n")
 
+    # 試行履歴 CSV 出力
+    csv_path = pathlib.Path(__file__).parent / "lgb_trials.csv"
+    output_df = result.trials_df.copy()
+    if "score" in output_df.columns:
+        output_df["acc"] = output_df["score"]
+    output_df.to_csv(csv_path, index=False, encoding="utf-8")
+    print(f"試行履歴を保存しました: {csv_path}\n")
+
+
     # 試行履歴
     print("=== 試行履歴（先頭5件）===")
     print(result.trials_df.head())
@@ -134,6 +143,8 @@ def main() -> None:
     # Markdown レポート
     print("\n=== レポート ===")
     print(result.report)
+    with open(pathlib.Path(__file__).parent / "lbg_hpo_report.md", "w") as f:
+        f.write(result.report)
 
 
 if __name__ == "__main__":
