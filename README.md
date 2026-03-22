@@ -129,17 +129,12 @@ def eval_fn(model) -> float:
         val_loss = loss_fn(model(X_val), y_val).item()
     return -val_loss  # 損失を符号反転してスコアに変換
 
-# 3. パラメーター空間を定義（PyTorch では必須）
-param_space = ParamSpace(specs=(
-    ParamSpec(name="hidden_size", type="int", low=16, high=256),
-))
-
-# 4. HPOAgent を作成して実行（X, y は不要）
+# 3. HPOAgent を作成して実行（param_space 省略時は LLM が自動生成）
 agent = HPOAgent(
     model=model_fn,        # ファクトリ関数を渡す
     eval_fn=eval_fn,
     n_trials=20,
-    param_space=param_space,
+    # param_space を省略すると LLM が eval_fn のソースコードを読んで自動設計する
 )
 
 result = agent.run()
@@ -149,7 +144,7 @@ print(result.best_params)
 > **PyTorch の注意点**
 > - `model` 引数にはモデルインスタンスではなく **ファクトリ関数** を渡します
 > - `eval_fn` のシグネチャは `(model) -> float`（`X`, `y` なし）
-> - `param_space` の指定が必須です（デフォルト空間がありません）
+> - `param_space` は省略可能です。省略した場合は LLM がモデル情報をもとに探索空間を自動設計します
 > - `X`, `y` は `eval_fn` 内でキャプチャする設計のため、`HPOAgent` への引数は不要です
 
 ---
@@ -180,7 +175,7 @@ agent = HPOAgent(
     n_trials=50,           # 必須
     X=X_train,             # LightGBM では必須、PyTorch では不要
     y=y_train,             # LightGBM では必須、PyTorch では不要
-    param_space=None,      # PyTorch では必須、LightGBM では任意
+    param_space=None,      # 任意（省略時は LLM が自動生成）
     seed=42,               # 任意
     prompts={},            # 任意
     llm_model=None,        # 任意
@@ -194,7 +189,7 @@ agent = HPOAgent(
 | `n_trials` | `int` | Yes | HPO の総試行回数 |
 | `X` | `Any` | LightGBM のみ | 特徴量データ（LightGBM 使用時は必須。PyTorch では不要） |
 | `y` | `Any` | LightGBM のみ | ターゲットデータ（LightGBM 使用時は必須。PyTorch では不要） |
-| `param_space` | `ParamSpace` | PyTorch では必須 | 探索するパラメーター空間。PyTorch では必須。LightGBM では省略時にデフォルト空間を使用 |
+| `param_space` | `ParamSpace` | No | 探索するパラメーター空間。省略時は LLM がモデル情報（クラス名・`eval_fn` ソースコード・試行回数）をもとに自動設計する |
 | `seed` | `int \| None` | No | 乱数シード。指定すると Sobol 探索・ベイズ最適化の結果が再現可能になる（デフォルト: `None`） |
 | `prompts` | `dict[str, str]` | No | エージェント別の追加プロンプト（詳細は[プロンプトのカスタマイズ](#プロンプトのカスタマイズ)を参照） |
 | `llm_model` | `str` | No | `.env` の `LLM_MODEL_NAME` を上書きしたい場合に指定 |

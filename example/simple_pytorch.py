@@ -131,15 +131,29 @@ param_space = ParamSpace(
 
 
 def main() -> None:
-    """HPO-Agent を使って MLP の hidden_size と dropout を最適化する。"""
+    """HPO-Agent を使って MLP の hidden_size と dropout を最適化する。
+
+    param_space を明示的に指定する方法と、LLM に自動生成させる方法の両方を示す。
+    """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     print("=== PyTorch MLP HPO-Agent Example ===\n")
 
+    # --- 方法1: param_space を明示的に指定する（従来の方法）---
+    # agent = HPOAgent(
+    #     model=model_fn,
+    #     eval_fn=eval_fn,
+    #     n_trials=15,
+    #     param_space=param_space,  # 明示的に指定
+    #     seed=42,
+    # )
+
+    # --- 方法2: param_space を省略して LLM に自動生成させる ---
+    # eval_fn のソースコードとモデルクラス名をもとに LLM が探索空間を設計する
     agent = HPOAgent(
         model=model_fn,
         eval_fn=eval_fn,
         n_trials=15,
-        param_space=param_space,
+        # param_space を省略 → LLM が自動生成
         seed=42,
     )
 

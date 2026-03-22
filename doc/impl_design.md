@@ -28,6 +28,8 @@
 | `LLMProviderBase` | 抽象クラス | LLMインスタンスを提供するインターフェースを定義する | 5.3 拡張性 |
 | `GoogleLLMProvider` | 具象クラス | Google Gemini の LLM インスタンスを提供する | 5.1 初期対応 LLM |
 | `ModelAdapterBase` | 抽象クラス | モデルのパラメータ空間取得・評価実行のインターフェースを定義する | 8.1 拡張性 |
+| `ParamSpecSchema` | Pydantic モデル | LLM の structured output 用パラメータ仕様スキーマ | LLM 自動生成 |
+| `ParamSpaceSchema` | Pydantic モデル | LLM の structured output 用パラメータ空間スキーマ | LLM 自動生成 |
 | `LightGBMAdapter` | 具象クラス | LightGBM に対してパラメータ空間取得・評価を実行する | 2.1 初期対応モデル |
 | `SklearnAdapter` | 具象クラス | scikit-learn 互換モデル（BaseEstimator）に対してパラメータ空間取得・評価を実行する | 2.1 対応モデル |
 | `HPOToolBase` | 抽象クラス | HPO ツール（探索アルゴリズム）のインターフェースを定義する | 4.3 ツール一覧 |
@@ -499,9 +501,11 @@ class HPOAgent:
     ) -> None: ...
 
     def run(self) -> HPOResult: ...
-    def _build_supervisor(self, adapter: ModelAdapterBase, param_space: ParamSpace) -> Supervisor: ...
-    def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace]: ...
+    def _build_supervisor(self, adapter: ModelAdapterBase, param_space: ParamSpace, generated_param_space: ParamSpace | None = None) -> Supervisor: ...
+    def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace | None]: ...
     def _resolve_llm_provider(self) -> GoogleLLMProvider: ...
+    def _generate_param_space(self) -> ParamSpace: ...
+    def _format_param_space(self, param_space: ParamSpace) -> list[str]: ...
 ```
 
 **SOLIDチェック**
@@ -813,11 +817,12 @@ classDiagram
 | 項目 | 内容 | 対応するクラス / メソッド |
 |------|------|----------------------|
 | 試行番号の連番管理 | 複数ツールを跨いで `trial_id` が重複しないよう `SupervisorState` で採番を管理する | `Supervisor._build_graph()` |
-| パラメーター空間の優先順位 | `HPOConfig.param_space` が指定されている場合はアダプターのデフォルト空間を使用せず、ユーザー指定の `ParamSpace` を使用する | `HPOAgent._resolve_adapter()` |
+| パラメーター空間の優先順位 | `HPOConfig.param_space` が指定されている場合は LLM 自動生成をスキップし、ユーザー指定の `ParamSpace` を使用する | `HPOAgent.run()` |
+| LLM パラメーター空間自動生成 | `param_space=None` の場合、HPO 開始前に LLM がモデルクラス名・`eval_fn` ソースコード・試行回数を受け取り `ParamSpaceSchema` として探索空間を生成する | `HPOAgent._generate_param_space()` |
 | AI 判断理由の記録 | Supervisor のツール選択理由は `SupervisorState.last_tool_reasoning` に保持し、`TrialRecord.reasoning` へ転記する。ExpertAgentTool のパラメーター提案理由は `TrialRecord.reasoning` に直接記録する | `Supervisor._build_graph()`, `ExpertAgentTool._run()` |
 | eval_fn のシグネチャ | `eval_fn(model, X, y) -> float` を基本とするが、将来的に任意引数を許容する設計にする | `ModelAdapterBase.evaluate()` |
 | プロンプト結合ルール | デフォルトシステムプロンプト + ユーザープロンプトを文字列連結で渡す。結合順序は必ずデフォストが先 | `Supervisor.__init__()`, `ExpertAgentTool.__init__()` |
-| LightGBM パラメータ空間 | MVP では `num_leaves`, `max_depth`, `learning_rate`, `n_estimators`, `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda` をデフォルト空間として定義する | `LightGBMAdapter.get_param_space()` |
+| LightGBM パラメータ空間 | LightGBM のデフォルト空間は廃止。`param_space` 未指定時は LLM が自動生成する（全モデル統一の方針） | `HPOAgent._generate_param_space()` |
 | 同期実行の保証 | `HPOAgent.run()` は同期ブロッキングとする。LangGraph の非同期 API は使用しない（将来拡張への考慮のみ） | `HPOAgent.run()` |
 | ログ出力 | 各試行の実行後に試行番号・スコア・評価時間・パラメータを `logging.INFO` で出力する。ツール完了時にはツール名・試行数・最良スコア・中間レポートを `logging.INFO` で出力する | `HPOToolBase._run()`, `Supervisor._tool_executor_node()` |
 | 中間レポートの出力タイミング | ツール実行が完了し `SupervisorState` が更新されたタイミングで `_report_progress()` を呼び出す。LLM を使用しないため低コスト | `Supervisor._report_progress()` |
