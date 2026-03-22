@@ -50,6 +50,8 @@ LLM_PROVIDER=google
 
 ## 基本的な使い方
 
+### LightGBM
+
 ```python
 import lightgbm as lgb
 from sklearn.datasets import load_breast_cancer
@@ -99,6 +101,56 @@ print(result.report)        # Markdown 形式のレポート
 >
 > クロスバリデーションを使いたい場合は、`eval_fn` 内で `copy.deepcopy(model)` して再学習することも可能です（[s5e4_lgbm.py](example/s5e4_lgbm.py) を参照）。
 
+### PyTorch
+
+PyTorch モデルは `fit`/`predict` を持たないため、`model_fn`（モデルファクトリ）と `eval_fn`（学習・評価ループ全体）を渡す設計です。
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from hpo_agent import HPOAgent, ParamSpace, ParamSpec
+
+# 1. モデルファクトリを定義（パラメータ辞書を受け取りモデルを返す）
+def model_fn(params):
+    return nn.Sequential(
+        nn.Linear(10, int(params["hidden_size"])),
+        nn.ReLU(),
+        nn.Linear(int(params["hidden_size"]), 1),
+    )
+
+# 2. 評価関数を定義（学習・評価ループ全体を含む。大きいほど良いスコア）
+def eval_fn(model) -> float:
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    loss_fn = nn.MSELoss()
+    # ... 学習ループ ...
+    with torch.no_grad():
+        val_loss = loss_fn(model(X_val), y_val).item()
+    return -val_loss  # 損失を符号反転してスコアに変換
+
+# 3. パラメーター空間を定義（PyTorch では必須）
+param_space = ParamSpace(specs=(
+    ParamSpec(name="hidden_size", type="int", low=16, high=256),
+))
+
+# 4. HPOAgent を作成して実行（X, y は不要）
+agent = HPOAgent(
+    model=model_fn,        # ファクトリ関数を渡す
+    eval_fn=eval_fn,
+    n_trials=20,
+    param_space=param_space,
+)
+
+result = agent.run()
+print(result.best_params)
+```
+
+> **PyTorch の注意点**
+> - `model` 引数にはモデルインスタンスではなく **ファクトリ関数** を渡します
+> - `eval_fn` のシグネチャは `(model) -> float`（`X`, `y` なし）
+> - `param_space` の指定が必須です（デフォルト空間がありません）
+> - `X`, `y` は `eval_fn` 内でキャプチャする設計のため、`HPOAgent` への引数は不要です
+
 ---
 
 ## 入力パラメーター一覧
@@ -108,9 +160,9 @@ agent = HPOAgent(
     model=model,           # 必須
     eval_fn=my_eval,       # 必須
     n_trials=50,           # 必須
-    X=X_train,             # 必須
-    y=y_train,             # 必須
-    param_space=None,      # 任意
+    X=X_train,             # LightGBM では必須、PyTorch では不要
+    y=y_train,             # LightGBM では必須、PyTorch では不要
+    param_space=None,      # PyTorch では必須、LightGBM では任意
     seed=42,               # 任意
     prompts={},            # 任意
     llm_model=None,        # 任意
@@ -119,12 +171,12 @@ agent = HPOAgent(
 
 | パラメーター | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `model` | `Any` | Yes | チューニング対象のモデルオブジェクト（MVP では LightGBM） |
-| `eval_fn` | `Callable` | Yes | ユーザー定義の評価関数。`(model, X, y) -> float` のシグネチャで、大きいほど良いスコアを返す |
+| `model` | `Any` | Yes | チューニング対象モデル。LightGBM: `lgb.LGBMModel` のインスタンス。PyTorch: `(params: dict) -> model` のファクトリ関数 |
+| `eval_fn` | `Callable` | Yes | 評価関数（大きいほど良いスコアを返す）。LightGBM: `(model, X, y) -> float`。PyTorch: `(model) -> float`（学習・評価ループ全体） |
 | `n_trials` | `int` | Yes | HPO の総試行回数 |
-| `X` | `Any` | Yes | モデルの学習・評価に使う特徴量データ |
-| `y` | `Any` | Yes | モデルの学習・評価に使うターゲットデータ |
-| `param_space` | `ParamSpace` | No | 探索するパラメーター空間を手動指定。省略時はモデルのデフォルト空間を使用 |
+| `X` | `Any` | LightGBM のみ | 特徴量データ（LightGBM 使用時は必須。PyTorch では不要） |
+| `y` | `Any` | LightGBM のみ | ターゲットデータ（LightGBM 使用時は必須。PyTorch では不要） |
+| `param_space` | `ParamSpace` | PyTorch では必須 | 探索するパラメーター空間。PyTorch では必須。LightGBM では省略時にデフォルト空間を使用 |
 | `seed` | `int \| None` | No | 乱数シード。指定すると Sobol 探索・ベイズ最適化の結果が再現可能になる（デフォルト: `None`） |
 | `prompts` | `dict[str, str]` | No | エージェント別の追加プロンプト（詳細は[プロンプトのカスタマイズ](#プロンプトのカスタマイズ)を参照） |
 | `llm_model` | `str` | No | `.env` の `LLM_MODEL_NAME` を上書きしたい場合に指定 |
