@@ -141,6 +141,18 @@ def deterministic_eval_fn():  # type: ignore[no-untyped-def]
     return eval_fn
 
 
+@pytest.fixture
+def narrow_search_space_tool(simple_param_space: ParamSpace) -> Any:
+    """NarrowSearchSpaceTool フィクスチャ（simple_param_space を使用）。"""
+    from hpo_agent.tools import NarrowSearchSpaceTool
+
+    return NarrowSearchSpaceTool(
+        param_space=simple_param_space,
+        name="narrow_search_space",
+        description="test",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fixtures: LightGBM セットアップ（A-2/A-3 テスト用）
 # ---------------------------------------------------------------------------
