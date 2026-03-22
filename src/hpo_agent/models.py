@@ -113,8 +113,8 @@ class HPOConfig:
     model: Any
     eval_fn: Callable[..., float]
     n_trials: int
-    X: Any
-    y: Any
+    X: Any = None
+    y: Any = None
     param_space: ParamSpace | None = None
     seed: int | None = None
     prompts: dict[str, str] = field(default_factory=dict)

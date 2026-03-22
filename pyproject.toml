@@ -33,6 +33,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "pytest-mock>=3.0",
     "ruff>=0.4.0",
+    "torch>=2.0",
 ]
 
 [tool.black]

@@ -210,23 +210,27 @@ def evaluate(self, params: dict[str, Any]) -> float:
 
 ---
 
-## 6. 将来の拡張
+## 6. PyTorchAdapter
 
-### 6-1. PyTorch モデル（拡張予定）
+### 6-1. PyTorch モデル
 
 PyTorch は `fit` / `predict` を持たないため、学習・評価ループ全体を `eval_fn` に委譲する設計とする。
+`torch` への依存はなく、型ヒントは `Any` を使用する（メイン依存に `torch` を含めないため）。
 
 ```python
 class PyTorchAdapter(ModelAdapterBase):
     def __init__(
         self,
-        model_fn: Callable[[dict[str, Any]], nn.Module],  # パラメータを受け取りモデルを返す関数
-        eval_fn: Callable[[nn.Module], float],            # 学習・評価ループ全体
+        model_fn: Callable[[dict[str, Any]], Any],  # パラメータを受け取りモデルを返す関数
+        eval_fn: Callable[[Any], float],             # 学習・評価ループ全体
+        param_space: ParamSpace,                     # ユーザーが必ず指定する
     ) -> None: ...
 ```
 
-- `get_param_space()` はユーザーが `model_fn` 定義時に併せて提供する
+- `get_default_param_space()` はコンストラクタで渡した `param_space` をそのまま返す
 - `evaluate(params)` は `model_fn(params)` → `eval_fn(model)` のフロー
+- `param_space` は必須（デフォルト空間なし。モデル構造に依存するため）
+- `HPOAgent` に `model` として callable（model_fn）を渡すと自動的に `PyTorchAdapter` が選択される
 
 ---
 
@@ -245,6 +249,15 @@ def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace]:
                 "scikit-learn モデルを使用する場合は param_space の指定が必須です。"
             )
         adapter = SklearnAdapter(model, self._config.eval_fn, ...)
+    elif callable(model):
+        # model_fn（PyTorch ファクトリ関数）として扱う
+        if self._config.param_space is None:
+            raise ValueError("PyTorch モデルを使用する場合は param_space の指定が必須です。")
+        adapter = PyTorchAdapter(
+            model_fn=model,
+            eval_fn=self._config.eval_fn,
+            param_space=self._config.param_space,
+        )
     else:
         raise TypeError(f"Unsupported model type: {type(model)}")
 
@@ -255,11 +268,11 @@ def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace]:
 
 ### モデル型とアダプターの対応表
 
-| モデルの型 | 使用するアダプター | 対応 |
+| モデルの型 | 使用するアダプター | 対応状況 |
 |-----------|----------------|---------|
 | `lgb.LGBMModel` のサブクラス | `LightGBMAdapter` | Yes |
 | `sklearn.base.BaseEstimator` のサブクラス | `SklearnAdapter` | Yes |
-| `torch.nn.Module` のサブクラス | `PyTorchAdapter` | No（拡張予定） |
+| callable（PyTorch model_fn） | `PyTorchAdapter` | Yes |
 
 ---
 
@@ -317,7 +330,7 @@ classDiagram
 
     ModelAdapterBase <|-- LightGBMAdapter : implements
     ModelAdapterBase <|-- SklearnAdapter : implements
-    ModelAdapterBase <|-- PyTorchAdapter : implements（拡張予定）
+    ModelAdapterBase <|-- PyTorchAdapter : implements
     ModelAdapterBase --> ParamSpace : returns
     ParamSpace "1" --> "*" ParamSpec : contains
     HPOAgent --> ModelAdapterBase : resolves

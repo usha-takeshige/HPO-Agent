@@ -633,3 +633,78 @@ class TestSklearnAdapter:
         agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
         with pytest.raises(ValueError, match="param_space"):
             agent._resolve_adapter()
+
+    def test_pytorch_model_fn_resolves_to_pytorch_adapter(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-30: callable な model_fn が PyTorchAdapter に解決される。"""
+        from hpo_agent.adapters import PyTorchAdapter
+        from hpo_agent.agent import HPOAgent
+
+        model_fn, eval_fn, param_space = pytorch_setup
+        agent = HPOAgent(
+            model=model_fn,
+            eval_fn=eval_fn,
+            n_trials=5,
+            param_space=param_space,
+        )
+        adapter, _ = agent._resolve_adapter()
+        assert isinstance(adapter, PyTorchAdapter)
+
+    def test_pytorch_without_param_space_raises_value_error(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-31: PyTorch 使用時に param_space=None で ValueError。"""
+        from hpo_agent.agent import HPOAgent
+
+        model_fn, eval_fn, _ = pytorch_setup
+        agent = HPOAgent(
+            model=model_fn,
+            eval_fn=eval_fn,
+            n_trials=5,
+            param_space=None,
+        )
+        with pytest.raises(ValueError):
+            agent._resolve_adapter()
+
+
+# ---------------------------------------------------------------------------
+# PyTorchAdapter（CMP-32〜34）
+# ---------------------------------------------------------------------------
+
+
+class TestPyTorchAdapter:
+    def test_evaluate_returns_float(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-32: evaluate() が float を返す。"""
+        from hpo_agent.adapters import PyTorchAdapter
+
+        model_fn, eval_fn, param_space = pytorch_setup
+        adapter = PyTorchAdapter(
+            model_fn=model_fn, eval_fn=eval_fn, param_space=param_space
+        )
+        result = adapter.evaluate({"hidden_size": 8})
+        assert isinstance(result, float)
+
+    def test_evaluate_calls_model_fn_with_params(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-33: evaluate() が model_fn をパラメータ付きで呼び出し、eval_fn に渡す。"""
+        import torch.nn as nn
+
+        from hpo_agent.adapters import PyTorchAdapter
+
+        model_fn, eval_fn, param_space = pytorch_setup
+        params = {"hidden_size": 16}
+        adapter = PyTorchAdapter(
+            model_fn=model_fn, eval_fn=eval_fn, param_space=param_space
+        )
+        # evaluate が正常終了し、モデルが nn.Module であることを確認
+        result = adapter.evaluate(params)
+        assert isinstance(result, float)
+        # model_fn が正しく hidden_size=16 のモデルを生成することを確認
+        model = model_fn(params)
+        assert isinstance(model, nn.Module)
+
+    def test_get_default_param_space_returns_provided_space(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-34: get_default_param_space() がコンストラクタに渡した param_space を返す。"""
+        from hpo_agent.adapters import PyTorchAdapter
+
+        model_fn, eval_fn, param_space = pytorch_setup
+        adapter = PyTorchAdapter(
+            model_fn=model_fn, eval_fn=eval_fn, param_space=param_space
+        )
+        assert adapter.get_default_param_space() is param_space
