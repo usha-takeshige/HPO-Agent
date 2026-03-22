@@ -18,7 +18,7 @@ from pydantic import ConfigDict, Field
 from scipy.stats.qmc import Sobol  # type: ignore[import-untyped]
 
 from hpo_agent.adapters import ModelAdapterBase
-from hpo_agent.models import ParamSpace, TrialRecord
+from hpo_agent.models import ParamSpace, ParamSpec, TrialRecord
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class HPOToolBase(BaseTool):
         self,
         n_trials: int,
         trial_history: list[TrialRecord],
+        effective_param_space: ParamSpace | None = None,
         **kwargs: Any,
     ) -> list[TrialRecord]:
         """探索を実行して TrialRecord のリストを返す。
@@ -49,6 +50,7 @@ class HPOToolBase(BaseTool):
         Args:
             n_trials: 実行する試行回数。
             trial_history: これまでの試行履歴。ウォームスタートに使用。
+            effective_param_space: 有効な探索空間。None の場合は self.param_space を使用する。
 
         Returns:
             新たに実施した試行の TrialRecord リスト。
@@ -75,14 +77,16 @@ class SobolSearchTool(HPOToolBase):
         self,
         n_trials: int,
         trial_history: list[TrialRecord],
+        effective_param_space: ParamSpace | None = None,
         **kwargs: Any,
     ) -> list[TrialRecord]:
         """Sobol 列でパラメータをサンプリングして評価する。"""
+        param_space = effective_param_space or self.param_space
         numerical_specs = [
-            s for s in self.param_space.specs if s.type in ("int", "float")
+            s for s in param_space.specs if s.type in ("int", "float")
         ]
         categorical_specs = [
-            s for s in self.param_space.specs if s.type == "categorical"
+            s for s in param_space.specs if s.type == "categorical"
         ]
 
         # --- Sobol サンプリング（数値パラメータ）---
@@ -164,14 +168,16 @@ class BayesianOptimizationTool(HPOToolBase):
         self,
         n_trials: int,
         trial_history: list[TrialRecord],
+        effective_param_space: ParamSpace | None = None,
         **kwargs: Any,
     ) -> list[TrialRecord]:
         """Bayesian 最適化でパラメータをサンプリングして評価する。"""
+        param_space = effective_param_space or self.param_space
         sampler = optuna.samplers.TPESampler(seed=self.seed)
         study = optuna.create_study(direction="maximize", sampler=sampler)
 
         # ウォームスタート: 過去の試行履歴を Optuna に登録
-        distributions = self._build_distributions()
+        distributions = self._build_distributions(param_space)
         for record in trial_history:
             params_clipped = {
                 k: v for k, v in record.params.items() if k in distributions
@@ -230,10 +236,12 @@ class BayesianOptimizationTool(HPOToolBase):
 
     def _build_distributions(
         self,
+        param_space: ParamSpace | None = None,
     ) -> dict[str, optuna.distributions.BaseDistribution]:
         """ParamSpace を Optuna の Distribution に変換する。"""
+        target = param_space or self.param_space
         distributions: dict[str, optuna.distributions.BaseDistribution] = {}
-        for spec in self.param_space.specs:
+        for spec in target.specs:
             if spec.type == "int":
                 assert spec.low is not None and spec.high is not None
                 distributions[spec.name] = optuna.distributions.IntDistribution(
@@ -281,12 +289,14 @@ class ExpertAgentTool(HPOToolBase):
         self,
         n_trials: int,
         trial_history: list[TrialRecord],
+        effective_param_space: ParamSpace | None = None,
         **kwargs: Any,
     ) -> list[TrialRecord]:
         """LLM からパラメータ提案を受け取って評価する。"""
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        param_space_desc = self._build_param_space_description()
+        param_space = effective_param_space or self.param_space
+        param_space_desc = self._build_param_space_description(param_space)
         # ループ内で更新するため mutable なリストとして保持
         current_history = list(trial_history)
 
@@ -376,10 +386,13 @@ class ExpertAgentTool(HPOToolBase):
                 merged.append(r)
         return sorted(merged, key=lambda r: r.trial_id)
 
-    def _build_param_space_description(self) -> str:
+    def _build_param_space_description(
+        self, param_space: ParamSpace | None = None
+    ) -> str:
         """ParamSpace をテキスト形式に変換する。"""
+        target = param_space or self.param_space
         lines: list[str] = []
-        for spec in self.param_space.specs:
+        for spec in target.specs:
             if spec.type == "categorical":
                 assert spec.choices is not None
                 lines.append(
@@ -400,3 +413,144 @@ class ExpertAgentTool(HPOToolBase):
             "上記の情報を参考に、次の試行パラメータを JSON で提案してください。\n"
             '{"reasoning": "提案理由", "params": {"param_name": value, ...}}'
         )
+
+
+# ---------------------------------------------------------------------------
+# NarrowSearchSpaceTool
+# ---------------------------------------------------------------------------
+
+
+class NarrowSearchSpaceTool(BaseTool):
+    """過去の探索結果をもとに探索空間を狭めるツール。
+
+    スーパーバイザーの LLM がこのツールを呼び出すと、SupervisorState の
+    current_param_space が更新され、以降の探索ツール（SobolSearchTool,
+    BayesianOptimizationTool, ExpertAgentTool）は狭めた空間を使用する。
+
+    入力 (param_updates) は JSON 配列文字列で、各要素は更新するパラメータの仕様を表す。
+    数値型の例: [{"name": "learning_rate", "low": 0.05, "high": 0.1}]
+    カテゴリカル型の例: [{"name": "boosting_type", "choices": ["gbdt"]}]
+
+    検証ルール:
+        - name が元の param_space に存在すること。
+        - 数値型: new_low >= original.low かつ new_high <= original.high かつ new_low < new_high。
+        - categorical 型: new_choices が original.choices の部分集合であること。
+
+    更新対象外のパラメータは元の仕様を引き継ぐ。
+    エラー発生時は "Error: ..." で始まる文字列を返す。
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    param_space: ParamSpace = Field(...)
+
+    def _run(self, param_updates: str, **kwargs: Any) -> str:
+        """param_updates を検証し、新しい param_space の説明文字列を返す。
+
+        Args:
+            param_updates: JSON 配列文字列。各パラメータの新しい範囲を指定する。
+
+        Returns:
+            成功時: 新しい param_space の説明文字列。
+            失敗時: "Error: ..." で始まるエラーメッセージ文字列。
+        """
+        result = self._build_narrowed_space(param_updates)
+        if isinstance(result, str):
+            return result
+        return self._describe_param_space(result)
+
+    def _build_narrowed_space(self, param_updates: str) -> ParamSpace | str:
+        """param_updates を解析・検証して新しい ParamSpace を返す。
+
+        Args:
+            param_updates: JSON 配列文字列。
+
+        Returns:
+            成功時: 新しい ParamSpace。失敗時: "Error: ..." で始まるエラーメッセージ文字列。
+        """
+        try:
+            updates: list[dict[str, Any]] = json.loads(param_updates)
+        except json.JSONDecodeError as e:
+            return f"Error: JSON パースエラー: {e}"
+
+        spec_map = {s.name: s for s in self.param_space.specs}
+        updated_specs: dict[str, ParamSpec] = {}
+
+        for update in updates:
+            name = update.get("name")
+            if not isinstance(name, str) or name not in spec_map:
+                return f"Error: パラメータ '{name}' は元の param_space に存在しません。"
+
+            original = spec_map[name]
+
+            if original.type in ("int", "float"):
+                assert original.low is not None and original.high is not None
+                new_low: float = float(update.get("low", original.low))
+                new_high: float = float(update.get("high", original.high))
+                if new_low < original.low:
+                    return (
+                        f"Error: '{name}' の low={new_low} は"
+                        f" 元の low={original.low} より小さくできません。"
+                    )
+                if new_high > original.high:
+                    return (
+                        f"Error: '{name}' の high={new_high} は"
+                        f" 元の high={original.high} より大きくできません。"
+                    )
+                if new_low >= new_high:
+                    return (
+                        f"Error: '{name}' の low={new_low} は"
+                        f" high={new_high} より小さくする必要があります。"
+                    )
+                updated_specs[name] = ParamSpec(
+                    name=name,
+                    type=original.type,
+                    low=new_low,
+                    high=new_high,
+                    log=original.log,
+                )
+            elif original.type == "categorical":
+                assert original.choices is not None
+                raw_choices = update.get("choices", list(original.choices))
+                new_choices = tuple(raw_choices)
+                invalid = set(new_choices) - set(original.choices)
+                if invalid:
+                    return (
+                        f"Error: '{name}' の choices に元にない値が含まれます: {invalid}"
+                    )
+                updated_specs[name] = ParamSpec(
+                    name=name,
+                    type="categorical",
+                    choices=new_choices,
+                )
+
+        # 更新対象でないパラメータは元のまま引き継ぎ、元の順序を維持する
+        new_specs: list[ParamSpec] = []
+        for spec in self.param_space.specs:
+            new_specs.append(updated_specs.get(spec.name, spec))
+
+        return ParamSpace(specs=tuple(new_specs))
+
+    def _describe_param_space(self, param_space: ParamSpace) -> str:
+        """ParamSpace をテキスト形式で説明する。
+
+        Args:
+            param_space: 説明対象の ParamSpace。
+
+        Returns:
+            各パラメータの仕様を1行ずつ列挙した文字列。
+        """
+        lines: list[str] = []
+        for spec in param_space.specs:
+            if spec.type == "categorical":
+                assert spec.choices is not None
+                lines.append(
+                    f"- {spec.name}: categorical, choices={list(spec.choices)}"
+                )
+            else:
+                scale = "log" if spec.log else "linear"
+                lines.append(
+                    f"- {spec.name}: {spec.type},"
+                    f" low={spec.low}, high={spec.high}, scale={scale}"
+                )
+        return "\n".join(lines)
