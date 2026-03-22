@@ -462,3 +462,259 @@ class TestExpertHistorySelection:
         # 選択された履歴が最大 30 件以内であることを確認
         selected = tool._select_history(history)
         assert len(selected) <= 30
+
+
+# ---------------------------------------------------------------------------
+# AGT-14〜16: NarrowSearchSpaceTool 連携テスト
+# ---------------------------------------------------------------------------
+
+
+class TestNarrowSearchSpaceIntegration:
+    def test_narrow_search_space_tool_selectable(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """AGT-14: narrow_search_space ツールが Supervisor に渡されエラーなく完了する."""
+        import json
+
+        from hpo_agent.models import HPOConfig
+        from hpo_agent.report import ReportGenerator
+        from hpo_agent.supervisor import Supervisor
+        from hpo_agent.tools import (
+            BayesianOptimizationTool,
+            ExpertAgentTool,
+            NarrowSearchSpaceTool,
+            SobolSearchTool,
+        )
+
+        narrow_args = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
+        llm = MagicMock()
+        llm.bind_tools.return_value = llm
+        llm.invoke.side_effect = [
+            AIMessage(
+                content="探索空間を狭めます。",
+                tool_calls=[
+                    {
+                        "name": "narrow_search_space",
+                        "args": {"param_updates": narrow_args},
+                        "id": "c1",
+                    }
+                ],
+            ),
+            AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),
+        ]
+        config = HPOConfig(
+            model=object(),
+            eval_fn=lambda m, X, y: 0.0,
+            n_trials=5,
+            X=None,
+            y=None,
+        )
+        tools = [
+            SobolSearchTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                name="sobol_search",
+                description="test",
+            ),
+            BayesianOptimizationTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                name="bayesian_optimization",
+                description="test",
+            ),
+            ExpertAgentTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                llm=MagicMock(),
+                system_prompt="test",
+                name="expert_agent",
+                description="test",
+            ),
+            NarrowSearchSpaceTool(
+                param_space=simple_param_space,
+                name="narrow_search_space",
+                description="test",
+            ),
+        ]
+        supervisor = Supervisor(
+            llm=llm,
+            tools=tools,
+            report_generator=ReportGenerator(),
+            system_prompt="test",
+        )
+        result = supervisor.run(config)
+        # narrow_search_space は TrialRecord を生成しないが、エラーなく完了すること
+        assert result is not None
+
+    def test_tool_executor_updates_current_param_space(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """AGT-16: _tool_executor_node を直接呼び出すと current_param_space が更新される."""
+        import json
+
+        from langchain_core.messages import AIMessage, SystemMessage
+
+        from hpo_agent.models import HPOConfig
+        from hpo_agent.report import ReportGenerator
+        from hpo_agent.state import SupervisorState
+        from hpo_agent.supervisor import Supervisor
+        from hpo_agent.tools import (
+            BayesianOptimizationTool,
+            ExpertAgentTool,
+            NarrowSearchSpaceTool,
+            SobolSearchTool,
+        )
+
+        narrow_args = json.dumps([{"name": "num_leaves", "low": 50, "high": 70}])
+        supervisor = Supervisor(
+            llm=MagicMock(),
+            tools=[
+                SobolSearchTool(
+                    adapter=dummy_adapter,
+                    param_space=simple_param_space,
+                    name="sobol_search",
+                    description="test",
+                ),
+                NarrowSearchSpaceTool(
+                    param_space=simple_param_space,
+                    name="narrow_search_space",
+                    description="test",
+                ),
+                BayesianOptimizationTool(
+                    adapter=dummy_adapter,
+                    param_space=simple_param_space,
+                    name="bayesian_optimization",
+                    description="test",
+                ),
+                ExpertAgentTool(
+                    adapter=dummy_adapter,
+                    param_space=simple_param_space,
+                    llm=MagicMock(),
+                    system_prompt="test",
+                    name="expert_agent",
+                    description="test",
+                ),
+            ],
+            report_generator=ReportGenerator(),
+            system_prompt="test",
+        )
+        state = SupervisorState(
+            messages=[
+                SystemMessage(content="test"),
+                AIMessage(
+                    content="探索空間を狭めます。",
+                    tool_calls=[
+                        {
+                            "name": "narrow_search_space",
+                            "args": {"param_updates": narrow_args},
+                            "id": "c1",
+                        }
+                    ],
+                ),
+            ],
+            trial_records=[],
+            remaining_trials=10,
+            config=HPOConfig(
+                model=object(),
+                eval_fn=lambda m, X, y: 0.0,
+                n_trials=10,
+                X=None,
+                y=None,
+            ),
+        )
+        result = supervisor._tool_executor_node(state)
+        assert "current_param_space" in result
+        assert result["current_param_space"] is not None
+        nl_spec = next(
+            s for s in result["current_param_space"].specs if s.name == "num_leaves"
+        )
+        assert nl_spec.low == 50.0
+        assert nl_spec.high == 70.0
+
+    def test_subsequent_sobol_uses_narrowed_space(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """AGT-15: narrow_search_space 後に Sobol を呼ぶと狭めた範囲内のパラメータのみ返る."""
+        import json
+
+        from hpo_agent.models import HPOConfig
+        from hpo_agent.report import ReportGenerator
+        from hpo_agent.supervisor import Supervisor
+        from hpo_agent.tools import (
+            BayesianOptimizationTool,
+            ExpertAgentTool,
+            NarrowSearchSpaceTool,
+            SobolSearchTool,
+        )
+
+        narrow_args = json.dumps([{"name": "num_leaves", "low": 50, "high": 70}])
+        llm = MagicMock()
+        llm.bind_tools.return_value = llm
+        llm.invoke.side_effect = [
+            AIMessage(
+                content="探索空間を狭めます。",
+                tool_calls=[
+                    {
+                        "name": "narrow_search_space",
+                        "args": {"param_updates": narrow_args},
+                        "id": "c1",
+                    }
+                ],
+            ),
+            AIMessage(
+                content="Sobol で探索します。",
+                tool_calls=[
+                    {"name": "sobol_search", "args": {"n_trials": 5}, "id": "c2"}
+                ],
+            ),
+            AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),
+        ]
+        config = HPOConfig(
+            model=object(),
+            eval_fn=lambda m, X, y: 0.0,
+            n_trials=5,
+            X=None,
+            y=None,
+        )
+        tools = [
+            SobolSearchTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                seed=0,
+                name="sobol_search",
+                description="test",
+            ),
+            NarrowSearchSpaceTool(
+                param_space=simple_param_space,
+                name="narrow_search_space",
+                description="test",
+            ),
+            BayesianOptimizationTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                name="bayesian_optimization",
+                description="test",
+            ),
+            ExpertAgentTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                llm=MagicMock(),
+                system_prompt="test",
+                name="expert_agent",
+                description="test",
+            ),
+        ]
+        supervisor = Supervisor(
+            llm=llm,
+            tools=tools,
+            report_generator=ReportGenerator(),
+            system_prompt="test",
+        )
+        result = supervisor.run(config)
+        # Sobol の結果が狭めた範囲内であることを確認
+        sobol_rows = result.trials_df[result.trials_df["tool_used"] == "sobol_search"]
+        assert len(sobol_rows) > 0
+        for _, row in sobol_rows.iterrows():
+            assert 50 <= row["num_leaves"] <= 70

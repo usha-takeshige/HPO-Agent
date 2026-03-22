@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -595,3 +595,117 @@ class TestHPOAgent:
         )
         with pytest.raises(TypeError):
             agent._resolve_adapter()
+
+
+# ---------------------------------------------------------------------------
+# CMP-27〜33: NarrowSearchSpaceTool
+# ---------------------------------------------------------------------------
+
+
+class TestNarrowSearchSpaceTool:
+    def test_valid_update_returns_description(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-27: 有効な param_updates で説明文字列を返す（"Error" を含まない）."""
+        import json
+
+        updates = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
+        result = narrow_search_space_tool._run(param_updates=updates)
+        assert isinstance(result, str)
+        assert "Error" not in result
+        assert "num_leaves" in result
+
+    def test_unknown_param_name_returns_error(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-28: 存在しないパラメータ名 → "Error" を含む文字列を返す."""
+        import json
+
+        updates = json.dumps([{"name": "nonexistent", "low": 0.1, "high": 0.2}])
+        result = narrow_search_space_tool._run(param_updates=updates)
+        assert "Error" in result
+
+    def test_expanding_low_returns_error(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-29: 数値型の low を元より小さく指定 → "Error" を含む文字列."""
+        import json
+
+        # num_leaves の original low は 20
+        updates = json.dumps([{"name": "num_leaves", "low": 10, "high": 80}])
+        result = narrow_search_space_tool._run(param_updates=updates)
+        assert "Error" in result
+
+    def test_invalid_categorical_choices_returns_error(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-30: categorical で元にない選択肢を指定 → "Error" を含む文字列."""
+        import json
+
+        # boosting_type の original choices は ("gbdt", "dart")
+        updates = json.dumps([{"name": "boosting_type", "choices": ["gbdt", "goss"]}])
+        result = narrow_search_space_tool._run(param_updates=updates)
+        assert "Error" in result
+
+    def test_build_narrowed_space_returns_param_space(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-31: _build_narrowed_space が有効入力で ParamSpace を返し、値が反映される."""
+        import json
+
+        from hpo_agent.models import ParamSpace
+
+        updates = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
+        result = narrow_search_space_tool._build_narrowed_space(updates)
+        assert isinstance(result, ParamSpace)
+        nl_spec = next(s for s in result.specs if s.name == "num_leaves")
+        assert nl_spec.low == 30.0
+        assert nl_spec.high == 80.0
+
+    def test_unmodified_params_preserved(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-32: 更新対象でないパラメータは元の値を引き継ぐ."""
+        import json
+
+        from hpo_agent.models import ParamSpace
+
+        updates = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
+        result = narrow_search_space_tool._build_narrowed_space(updates)
+        assert isinstance(result, ParamSpace)
+        lr_spec = next(s for s in result.specs if s.name == "learning_rate")
+        assert lr_spec.low == 0.01
+        assert lr_spec.high == 0.3
+
+    def test_sobol_uses_effective_param_space(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """CMP-33: SobolSearchTool に effective_param_space を渡すと狭めた範囲内でサンプリング."""
+        from hpo_agent.models import ParamSpace, ParamSpec
+        from hpo_agent.tools import SobolSearchTool
+
+        narrow_space = ParamSpace(
+            specs=(
+                ParamSpec(name="num_leaves", type="int", low=50, high=70),
+                ParamSpec(
+                    name="learning_rate", type="float", low=0.05, high=0.1, log=True
+                ),
+                ParamSpec(
+                    name="boosting_type", type="categorical", choices=("gbdt",)
+                ),
+            )
+        )
+        tool = SobolSearchTool(
+            adapter=dummy_adapter,
+            param_space=simple_param_space,
+            seed=0,
+            name="sobol_search",
+            description="test",
+        )
+        results = tool._run(
+            n_trials=10, trial_history=[], effective_param_space=narrow_space
+        )
+        for r in results:
+            assert 50 <= r.params["num_leaves"] <= 70
+            assert 0.05 <= r.params["learning_rate"] <= 0.1
+            assert r.params["boosting_type"] == "gbdt"

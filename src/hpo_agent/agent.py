@@ -7,7 +7,6 @@ from collections.abc import Callable
 from typing import Any
 
 from dotenv import load_dotenv
-
 from langchain_core.tools import BaseTool
 
 from hpo_agent.adapters import LightGBMAdapter, ModelAdapterBase

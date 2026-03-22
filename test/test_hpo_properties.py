@@ -251,3 +251,40 @@ class TestStability:
                 n_trials=3,
                 seed=0,
             )
+
+
+class TestNarrowedSpaceConstraints:
+    def test_params_within_narrowed_bounds(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """HPO-07b: SobolSearchTool に narrow した ParamSpace を渡すと全試行が狭めた bounds 内."""
+        from hpo_agent.models import ParamSpace, ParamSpec
+        from hpo_agent.tools import SobolSearchTool
+
+        narrow_space = ParamSpace(
+            specs=(
+                ParamSpec(name="num_leaves", type="int", low=40, high=70),
+                ParamSpec(
+                    name="learning_rate", type="float", low=0.05, high=0.2, log=True
+                ),
+                ParamSpec(
+                    name="boosting_type", type="categorical", choices=("gbdt",)
+                ),
+            )
+        )
+        tool = SobolSearchTool(
+            adapter=dummy_adapter,
+            param_space=simple_param_space,
+            seed=42,
+            name="sobol_search",
+            description="test",
+        )
+        results = tool._run(
+            n_trials=20,
+            trial_history=[],
+            effective_param_space=narrow_space,
+        )
+        for r in results:
+            assert 40 <= r.params["num_leaves"] <= 70
+            assert 0.05 <= r.params["learning_rate"] <= 0.2
+            assert r.params["boosting_type"] == "gbdt"
