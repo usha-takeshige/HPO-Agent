@@ -52,6 +52,7 @@ python_version = "3.12"
 strict = true
 mypy_path = "src"
 
+
 [tool.pytest.ini_options]
 testpaths = ["test"]
 addopts = "--cov=src --cov-report=term-missing"

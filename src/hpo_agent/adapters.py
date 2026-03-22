@@ -8,6 +8,8 @@ from collections.abc import Callable
 from typing import Any
 
 import lightgbm as lgb
+from sklearn.base import BaseEstimator  # type: ignore[import-untyped]
+from sklearn.base import clone as sklearn_clone
 
 from hpo_agent.models import ParamSpace, ParamSpec
 
@@ -79,6 +81,52 @@ class LightGBMAdapter(ModelAdapterBase):
         元のモデルオブジェクトは変更しない（deepcopy を使用）。
         """
         model_copy = copy.deepcopy(self._model)
+        model_copy.set_params(**params)
+        model_copy.fit(self._X, self._y)
+        return self._eval_fn(model_copy, self._X, self._y)
+
+
+class SklearnAdapter(ModelAdapterBase):
+    """sklearn 互換モデル（BaseEstimator）に対してパラメータ空間取得・評価を実行するアダプター。
+
+    evaluate() は sklearn.base.clone() でモデルを複製するため、fitted 状態がリセットされ、
+    元のモデルオブジェクトは変更されない。
+
+    デフォルトパラメータ空間は提供しない。HPOAgent に param_space を必ず指定すること。
+
+    Args:
+        model: チューニング対象の sklearn 互換モデル（BaseEstimator のサブクラス）。
+        eval_fn: 評価関数。シグネチャ: (model, X, y) -> float。大きいほど良いスコア。
+        X: 特徴量データ。
+        y: ターゲットデータ。
+    """
+
+    def __init__(
+        self,
+        model: BaseEstimator,
+        eval_fn: Callable[..., float],
+        X: Any,
+        y: Any,
+    ) -> None:
+        """SklearnAdapter を初期化する。"""
+        self._model = model
+        self._eval_fn = eval_fn
+        self._X = X
+        self._y = y
+
+    def get_default_param_space(self) -> ParamSpace:
+        """sklearn はモデルが多様なためデフォルトパラメータ空間を提供しない。"""
+        raise NotImplementedError(
+            "SklearnAdapter はデフォルトパラメータ空間を持ちません。"
+            " HPOAgent に param_space を指定してください。"
+        )
+
+    def evaluate(self, params: dict[str, Any]) -> float:
+        """パラメータを設定してモデルを学習・評価し、スコアを返す。
+
+        元のモデルオブジェクトは変更しない（sklearn.base.clone() を使用）。
+        """
+        model_copy: BaseEstimator = sklearn_clone(self._model)
         model_copy.set_params(**params)
         model_copy.fit(self._X, self._y)
         return self._eval_fn(model_copy, self._X, self._y)
