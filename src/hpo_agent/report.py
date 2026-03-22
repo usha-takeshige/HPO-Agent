@@ -6,7 +6,7 @@ from collections import Counter
 from datetime import datetime
 from typing import Any
 
-from hpo_agent.models import TrialRecord
+from hpo_agent.models import ParamSpace, TrialRecord
 
 
 class ReportGenerator:
@@ -121,6 +121,7 @@ class ReportGenerator:
         best_score: float,
         llm: Any,
         seed: int | None = None,
+        generated_param_space: ParamSpace | None = None,
     ) -> str:
         """最終レポートを生成する（LLM による AI 考察を含む）。
 
@@ -130,6 +131,7 @@ class ReportGenerator:
             best_score: 最良スコア。
             llm: LLM インスタンス（AI 考察用）。
             seed: 乱数シード。
+            generated_param_space: LLM が自動生成したパラメータ空間。指定時はレポートに記載。
 
         Returns:
             Markdown 形式のレポート文字列。
@@ -143,6 +145,29 @@ class ReportGenerator:
             seed=seed,
             title="# HPO 最終レポート",
         )
+
+        # LLM が自動生成したパラメータ空間のセクション
+        generated_space_lines: list[str] = []
+        if generated_param_space is not None:
+            generated_space_lines += [
+                "",
+                "## LLM が自動生成したパラメータ空間",
+                "",
+                "param_space が未指定のため、LLM がモデル情報をもとに以下の探索空間を設計しました。",
+                "",
+            ]
+            for spec in generated_param_space.specs:
+                if spec.type == "categorical":
+                    generated_space_lines.append(
+                        f"- **{spec.name}**: categorical,"
+                        f" choices={list(spec.choices or [])}"
+                    )
+                else:
+                    scale = "log スケール" if spec.log else "linear スケール"
+                    generated_space_lines.append(
+                        f"- **{spec.name}**: {spec.type},"
+                        f" [{spec.low}, {spec.high}], {scale}"
+                    )
 
         # 各ステップでの AI 判断理由の記録
         reasoning_lines: list[str] = []
@@ -177,7 +202,12 @@ class ReportGenerator:
         else:
             timing_lines.append("- 試行なし")
 
-        full_report = base + "\n".join(reasoning_lines) + "\n".join(timing_lines)
+        full_report = (
+            base
+            + "\n".join(generated_space_lines)
+            + "\n".join(reasoning_lines)
+            + "\n".join(timing_lines)
+        )
 
         # AI 考察（LLM 生成）
         prompt = (
