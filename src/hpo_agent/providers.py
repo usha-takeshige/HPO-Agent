@@ -101,7 +101,7 @@ class AnthropicLLMProvider(LLMProviderBase):
         """
         from langchain_anthropic import ChatAnthropic
 
-        return ChatAnthropic(
+        return ChatAnthropic(  # type: ignore[call-arg]
             model=self._model_name,
             api_key=self._api_key,  # type: ignore[arg-type]
             temperature=temperature,
