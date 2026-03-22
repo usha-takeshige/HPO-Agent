@@ -78,3 +78,31 @@ class OpenAILLMProvider(LLMProviderBase):
             api_key=self._api_key,  # type: ignore[arg-type]
             temperature=temperature,
         )
+
+
+class AnthropicLLMProvider(LLMProviderBase):
+    """Anthropic Claude の LLM インスタンスを提供するプロバイダー。
+
+    Args:
+        api_key: Anthropic API キー。
+        model_name: 使用するモデル名（例: "claude-opus-4-6"）。
+    """
+
+    def __init__(self, api_key: str, model_name: str) -> None:
+        """AnthropicLLMProvider を初期化する。"""
+        self._api_key = api_key
+        self._model_name = model_name
+
+    def get_llm(self, temperature: float = 0) -> BaseChatModel:
+        """Anthropic Claude の LLM インスタンスを返す。
+
+        Args:
+            temperature: サンプリング温度。0 は確定的、高いほど多様な出力。
+        """
+        from langchain_anthropic import ChatAnthropic
+
+        return ChatAnthropic(  # type: ignore[call-arg]
+            model=self._model_name,
+            api_key=self._api_key,  # type: ignore[arg-type]
+            temperature=temperature,
+        )

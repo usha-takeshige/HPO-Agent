@@ -74,6 +74,60 @@ class TestOpenAILLMProvider:
 
 
 # ---------------------------------------------------------------------------
+# AnthropicLLMProvider / _resolve_llm_provider
+# ---------------------------------------------------------------------------
+
+
+class TestAnthropicLLMProvider:
+    def test_get_llm_returns_base_chat_model(self) -> None:
+        """AnthropicLLMProvider.get_llm() が BaseChatModel を返す。"""
+        from unittest.mock import MagicMock, patch
+
+        from langchain_core.language_models import BaseChatModel
+
+        from hpo_agent.providers import AnthropicLLMProvider
+
+        mock_llm = MagicMock(spec=BaseChatModel)
+        with patch("langchain_anthropic.ChatAnthropic", return_value=mock_llm):
+            provider = AnthropicLLMProvider(
+                api_key="sk-ant-dummy", model_name="claude-opus-4-6"
+            )
+            llm = provider.get_llm(temperature=0)
+        assert llm is mock_llm
+
+    def test_resolve_llm_provider_returns_anthropic(
+        self, lgbm_binary_setup, monkeypatch: pytest.MonkeyPatch  # type: ignore[no-untyped-def]
+    ) -> None:
+        """LLM_PROVIDER=anthropic で AnthropicLLMProvider が返る。"""
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.providers import AnthropicLLMProvider
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("LLM_API_KEY", "sk-ant-dummy")
+        monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
+
+        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        provider = agent._resolve_llm_provider()
+        assert isinstance(provider, AnthropicLLMProvider)
+
+    def test_resolve_llm_provider_unknown_raises(
+        self, lgbm_binary_setup, monkeypatch: pytest.MonkeyPatch  # type: ignore[no-untyped-def]
+    ) -> None:
+        """未サポートの LLM_PROVIDER 値で ValueError が送出される。"""
+        from hpo_agent.agent import HPOAgent
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        monkeypatch.setenv("LLM_PROVIDER", "unknown_provider")
+        monkeypatch.setenv("LLM_API_KEY", "dummy")
+        monkeypatch.setenv("LLM_MODEL_NAME", "dummy-model")
+
+        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        with pytest.raises(ValueError, match="Unsupported LLM_PROVIDER"):
+            agent._resolve_llm_provider()
+
+
+# ---------------------------------------------------------------------------
 # CMP-21/22: ParamSpec
 # ---------------------------------------------------------------------------
 
