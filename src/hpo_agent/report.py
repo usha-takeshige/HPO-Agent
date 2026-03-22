@@ -167,8 +167,12 @@ class ReportGenerator:
             ]
             for tool in sorted(set(r.tool_used for r in trial_records)):
                 tool_records = [r for r in trial_records if r.tool_used == tool]
-                avg_eval = sum(r.eval_duration for r in tool_records) / len(tool_records)
-                avg_algo = sum(r.algo_duration for r in tool_records) / len(tool_records)
+                avg_eval = sum(r.eval_duration for r in tool_records) / len(
+                    tool_records
+                )
+                avg_algo = sum(r.algo_duration for r in tool_records) / len(
+                    tool_records
+                )
                 timing_lines.append(f"| {tool} | {avg_eval:.4f} | {avg_algo:.4f} |")
         else:
             timing_lines.append("- 試行なし")
@@ -190,8 +194,7 @@ class ReportGenerator:
         ai_content = response.content
         if isinstance(ai_content, list):
             ai_content = "".join(
-                b.get("text", "") if isinstance(b, dict) else str(b)
-                for b in ai_content
+                b.get("text", "") if isinstance(b, dict) else str(b) for b in ai_content
             )
         ai_section = f"\n\n## AI考察\n\n{ai_content}"
         return full_report + ai_section

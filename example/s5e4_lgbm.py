@@ -171,7 +171,7 @@ def main() -> None:
     print(f"最良パラメータ: {result.best_params}\n")
 
     # 試行履歴 CSV 出力
-    csv_path = pathlib.Path(__file__).parent / "output"  / "s5e4_trials.csv"
+    csv_path = pathlib.Path(__file__).parent / "output" / "s5e4_trials.csv"
     output_df = result.trials_df.copy()
     if "score" in output_df.columns:
         output_df["cv_rmse"] = -output_df["score"]
@@ -185,7 +185,9 @@ def main() -> None:
     # Markdown レポート
     print("\n=== レポート ===")
     print(result.report)
-    with open(pathlib.Path(__file__).parent / "output" / "s5e4_hpo_report.md", "w") as f:
+    with open(
+        pathlib.Path(__file__).parent / "output" / "s5e4_hpo_report.md", "w"
+    ) as f:
         f.write(result.report)
 
 

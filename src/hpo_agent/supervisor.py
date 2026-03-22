@@ -95,8 +95,7 @@ class Supervisor:
         _content = response.content
         if isinstance(_content, list):
             _content = "".join(
-                b.get("text", "") if isinstance(b, dict) else str(b)
-                for b in _content
+                b.get("text", "") if isinstance(b, dict) else str(b) for b in _content
             )
         reasoning = _content if isinstance(_content, str) else ""
         return {
