@@ -175,7 +175,8 @@ class HPOAgent:
             構築済みの Supervisor。
         """
         llm_provider = self._resolve_llm_provider()
-        llm = llm_provider.get_llm()
+        supervisor_llm = llm_provider.get_llm(temperature=0)
+        expert_llm = llm_provider.get_llm(temperature=0.3)
         seed = self._config.seed
 
         expert_system_prompt = build_system_prompt(
@@ -200,7 +201,7 @@ class HPOAgent:
             ExpertAgentTool(
                 adapter=adapter,
                 param_space=param_space,
-                llm=llm,
+                llm=expert_llm,
                 system_prompt=expert_system_prompt,
                 name="expert_agent",
                 description="専門家 AI エージェントによる決め打ち探索",
@@ -221,7 +222,7 @@ class HPOAgent:
             self._config.prompts.get("supervisor"),
         )
         return Supervisor(
-            llm=llm,
+            llm=supervisor_llm,
             tools=tools,
             report_generator=ReportGenerator(),
             system_prompt=supervisor_prompt,
