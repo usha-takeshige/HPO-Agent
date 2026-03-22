@@ -204,10 +204,8 @@ class Supervisor:
         # LangGraph の invoke は dict を返す場合がある
         if isinstance(final_state, dict):
             trial_records: list[TrialRecord] = final_state.get("trial_records", [])
-            current_report: str = final_state.get("current_report", "")
         else:
             trial_records = final_state.trial_records
-            current_report = final_state.current_report
 
         best_score, best_params = self._find_best(trial_records)
 

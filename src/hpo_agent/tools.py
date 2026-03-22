@@ -11,8 +11,6 @@ from datetime import datetime
 from math import exp, log
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 import numpy as np
 import optuna
 from langchain_core.tools import BaseTool
@@ -21,6 +19,8 @@ from scipy.stats.qmc import Sobol  # type: ignore[import-untyped]
 
 from hpo_agent.adapters import ModelAdapterBase
 from hpo_agent.models import ParamSpace, TrialRecord
+
+logger = logging.getLogger(__name__)
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
