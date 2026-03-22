@@ -11,7 +11,7 @@ import lightgbm as lgb
 from sklearn.base import BaseEstimator  # type: ignore[import-untyped]
 from sklearn.base import clone as sklearn_clone
 
-from hpo_agent.models import ParamSpace, ParamSpec
+from hpo_agent.models import ParamSpace
 
 
 class ModelAdapterBase(ABC):
@@ -30,20 +30,6 @@ class ModelAdapterBase(ABC):
     def evaluate(self, params: dict[str, Any]) -> float:
         """指定したパラメータでモデルを評価し、スコアを返す。"""
         ...
-
-
-_LIGHTGBM_DEFAULT_PARAM_SPACE = ParamSpace(
-    specs=(
-        ParamSpec(name="num_leaves", type="int", low=20, high=300),
-        ParamSpec(name="max_depth", type="int", low=3, high=12),
-        ParamSpec(name="learning_rate", type="float", low=1e-4, high=0.3, log=True),
-        ParamSpec(name="n_estimators", type="int", low=50, high=1000),
-        ParamSpec(name="subsample", type="float", low=0.5, high=1.0),
-        ParamSpec(name="colsample_bytree", type="float", low=0.5, high=1.0),
-        ParamSpec(name="reg_alpha", type="float", low=1e-8, high=10.0, log=True),
-        ParamSpec(name="reg_lambda", type="float", low=1e-8, high=10.0, log=True),
-    )
-)
 
 
 class LightGBMAdapter(ModelAdapterBase):
@@ -72,8 +58,11 @@ class LightGBMAdapter(ModelAdapterBase):
         self._y = y
 
     def get_default_param_space(self) -> ParamSpace:
-        """LightGBM のデフォルトパラメータ空間（8パラメータ）を返す。"""
-        return _LIGHTGBM_DEFAULT_PARAM_SPACE
+        """LightGBM はデフォルトパラメータ空間を提供しない。LLM が自動生成する。"""
+        raise NotImplementedError(
+            "LightGBMAdapter はデフォルトパラメータ空間を持ちません。"
+            " param_space を省略した場合は LLM が自動生成します。"
+        )
 
     def evaluate(self, params: dict[str, Any]) -> float:
         """パラメータを設定してモデルを学習・評価し、スコアを返す。
@@ -139,11 +128,12 @@ class PyTorchAdapter(ModelAdapterBase):
     model_fn がパラメータを受け取ってモデルを構築し、eval_fn がそのモデルを学習・評価して
     スコアを返す。torch への依存はなく、任意の呼び出し可能オブジェクトを受け付ける。
 
+    param_space は HPOAgent に渡すか、省略して LLM に自動生成させる。
+
     Args:
         model_fn: パラメータ辞書を受け取り、モデルオブジェクトを返すファクトリ関数。
         eval_fn: モデルオブジェクトを受け取り、学習・評価を行ってスコアを返す関数。
             大きいほど良いスコア。
-        param_space: 最適化対象のパラメータ空間。PyTorch では必須。
 
     Example:
         >>> def model_fn(params):
@@ -151,23 +141,24 @@ class PyTorchAdapter(ModelAdapterBase):
         >>> def eval_fn(model):
         ...     # 学習・評価ループ
         ...     return accuracy
-        >>> adapter = PyTorchAdapter(model_fn=model_fn, eval_fn=eval_fn, param_space=space)
+        >>> adapter = PyTorchAdapter(model_fn=model_fn, eval_fn=eval_fn)
     """
 
     def __init__(
         self,
         model_fn: Callable[[dict[str, Any]], Any],
         eval_fn: Callable[[Any], float],
-        param_space: ParamSpace,
     ) -> None:
         """PyTorchAdapter を初期化する。"""
         self._model_fn = model_fn
         self._eval_fn = eval_fn
-        self._param_space = param_space
 
     def get_default_param_space(self) -> ParamSpace:
-        """コンストラクタで指定されたパラメータ空間を返す。"""
-        return self._param_space
+        """PyTorch はデフォルトパラメータ空間を提供しない。LLM が自動生成する。"""
+        raise NotImplementedError(
+            "PyTorchAdapter はデフォルトパラメータ空間を持ちません。"
+            " param_space を省略した場合は LLM が自動生成します。"
+        )
 
     def evaluate(self, params: dict[str, Any]) -> float:
         """model_fn でモデルを構築し、eval_fn で学習・評価してスコアを返す。"""
