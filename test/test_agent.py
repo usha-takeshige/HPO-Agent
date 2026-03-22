@@ -283,23 +283,25 @@ class TestSupervisorLoop:
         )
 
         expert_llm = MagicMock()
-        expert_llm.invoke.return_value.content = (
-            '{"reasoning": "ok", "params": {"num_leaves": 64, "learning_rate": 0.05, "boosting_type": "gbdt"}}'
-        )
+        expert_llm.invoke.return_value.content = '{"reasoning": "ok", "params": {"num_leaves": 64, "learning_rate": 0.05, "boosting_type": "gbdt"}}'
 
         supervisor_llm = MagicMock()
         supervisor_llm.bind_tools.return_value = supervisor_llm
         supervisor_llm.invoke.side_effect = [
             AIMessage(
                 content="expert_agent を実行します。",
-                tool_calls=[{"name": "expert_agent", "args": {"n_trials": 1}, "id": "c1"}],
+                tool_calls=[
+                    {"name": "expert_agent", "args": {"n_trials": 1}, "id": "c1"}
+                ],
             ),
             AIMessage(content="完了", tool_calls=[]),
             MagicMock(content="AI 考察テキスト"),
         ]
 
         user_expert_prompt = "専門家指示: 正則化を重視"
-        expert_system_prompt = build_system_prompt(EXPERT_AGENT_DEFAULT_PROMPT, user_expert_prompt)
+        expert_system_prompt = build_system_prompt(
+            EXPERT_AGENT_DEFAULT_PROMPT, user_expert_prompt
+        )
 
         config = HPOConfig(
             model=object(),
@@ -342,7 +344,12 @@ class TestSupervisorLoop:
         call_args = expert_llm.invoke.call_args_list[0]
         messages = call_args[0][0]
         system_content = next(
-            (str(m.content) for m in messages if hasattr(m, "type") and m.type == "system"), ""
+            (
+                str(m.content)
+                for m in messages
+                if hasattr(m, "type") and m.type == "system"
+            ),
+            "",
         )
         assert "専門家指示" in system_content
 
