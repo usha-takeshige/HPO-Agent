@@ -33,6 +33,7 @@ dev = [
     "pytest-mock>=3.0",
     "ruff>=0.4.0",
     "scikit-learn>=1.5",
+    "torch>=2.0",
 ]
 
 [tool.black]

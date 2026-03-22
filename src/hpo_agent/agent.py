@@ -8,7 +8,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from hpo_agent.adapters import LightGBMAdapter, ModelAdapterBase
+from hpo_agent.adapters import LightGBMAdapter, ModelAdapterBase, PyTorchAdapter
 from hpo_agent.models import HPOConfig, HPOResult, ParamSpace
 from hpo_agent.prompts import (
     EXPERT_AGENT_DEFAULT_PROMPT,
@@ -32,13 +32,27 @@ class HPOAgent:
     依存解決（アダプター・LLM プロバイダー・ツール）を行い、
     Supervisor を構築して実行する。
 
+    LightGBM の場合:
+        model に lgb.LGBMModel インスタンスを渡す。eval_fn のシグネチャは
+        (model, X, y) -> float。X, y は必須。
+
+    PyTorch の場合:
+        model にモデルファクトリ関数 (params: dict) -> model を渡す。
+        eval_fn のシグネチャは (model) -> float（学習・評価ループ全体を含む）。
+        X, y は不要。param_space の指定が必須。
+
     Args:
-        model: チューニング対象モデル。現在 LightGBM のみサポート。
-        eval_fn: 評価関数。シグネチャ: (model, X, y) -> float。大きいほど良いスコア。
+        model: チューニング対象モデルまたはモデルファクトリ関数。
+            LightGBM: lgb.LGBMModel のインスタンス。
+            PyTorch: パラメータ辞書を受け取りモデルを返す callable。
+        eval_fn: 評価関数。大きいほど良いスコア。
+            LightGBM: (model, X, y) -> float。
+            PyTorch: (model) -> float（学習・評価ループ全体）。
         n_trials: 総試行回数。
-        X: 特徴量データ。
-        y: ターゲットデータ。
-        param_space: 最適化対象パラメータ空間。None の場合はアダプターのデフォルトを使用。
+        X: 特徴量データ（LightGBM のみ使用）。
+        y: ターゲットデータ（LightGBM のみ使用）。
+        param_space: 最適化対象パラメータ空間。PyTorch では必須。
+            LightGBM で None の場合はアダプターのデフォルトを使用。
         seed: 乱数シード。None の場合は非決定的。
         prompts: エージェント別追加プロンプト辞書。キー: "supervisor", "expert_agent"。
         llm_model: LLM モデル名（.env 設定の上書き用）。
@@ -49,8 +63,8 @@ class HPOAgent:
         model: Any,
         eval_fn: Callable[..., float],
         n_trials: int,
-        X: Any,
-        y: Any,
+        X: Any = None,
+        y: Any = None,
         param_space: ParamSpace | None = None,
         seed: int | None = None,
         prompts: dict[str, str] | None = None,
@@ -92,16 +106,26 @@ class HPOAgent:
 
         model = self._config.model
         if isinstance(model, lgb.LGBMModel):
-            adapter = LightGBMAdapter(
+            adapter: ModelAdapterBase = LightGBMAdapter(
                 model=model,
                 eval_fn=self._config.eval_fn,
                 X=self._config.X,
                 y=self._config.y,
             )
+        elif callable(model):
+            if self._config.param_space is None:
+                raise ValueError(
+                    "PyTorch モデルを使用する場合は param_space の指定が必須です。"
+                )
+            adapter = PyTorchAdapter(
+                model_fn=model,
+                eval_fn=self._config.eval_fn,
+                param_space=self._config.param_space,
+            )
         else:
             raise TypeError(
                 f"Unsupported model type: {type(model)}. "
-                "Currently only LightGBM models are supported."
+                "LightGBM (lgb.LGBMModel) または PyTorch (callable な model_fn) を指定してください。"
             )
 
         param_space = self._config.param_space or adapter.get_default_param_space()
