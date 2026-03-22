@@ -173,29 +173,46 @@ sequenceDiagram
 
 ---
 
-## 5. 将来の拡張
+## 5. SklearnAdapter
 
-### 5-1. sklearn 系モデル（拡張予定）
+### 5-1. クラス定義
 
-sklearn の `BaseEstimator` を持つモデルに対応する。インターフェースは LightGBM と同一だが、パラメータ空間は **モデルクラスごとに個別定義**する。
+sklearn の `BaseEstimator` を持つモデルに対応する。インターフェースは LightGBM と同一だが、モデルが多様なため **デフォルトパラメータ空間を持たない**。使用時は `HPOAgent` に `param_space` を必ず指定する。
 
 ```python
 class SklearnAdapter(ModelAdapterBase):
     def __init__(
         self,
         model: BaseEstimator,
-        eval_fn: Callable[[BaseEstimator, Any, Any], float],
+        eval_fn: Callable[..., float],
         X: Any,
         y: Any,
     ) -> None: ...
+
+    def get_default_param_space(self) -> ParamSpace: ...  # NotImplementedError を送出
+    def evaluate(self, params: dict[str, Any]) -> float: ...
 ```
 
-- `get_param_space()` はモデルクラスに基づいて事前定義された空間を返す
+- `get_default_param_space()` は `NotImplementedError` を送出する。sklearn はモデルが多様なためデフォルト空間を持たない
 - `evaluate()` は `clone(model)` → `set_params()` → `fit()` → `eval_fn()` のフロー（`copy.deepcopy` の代わりに `sklearn.base.clone` を使用）
 
 ---
 
-### 5-2. PyTorch モデル（拡張予定）
+### 5-2. `evaluate()` の処理フロー
+
+```python
+def evaluate(self, params: dict[str, Any]) -> float:
+    model_copy = sklearn_clone(self._model)  # fitted 状態をリセット
+    model_copy.set_params(**params)
+    model_copy.fit(self._X, self._y)
+    return self._eval_fn(model_copy, self._X, self._y)
+```
+
+---
+
+## 6. 将来の拡張
+
+### 6-1. PyTorch モデル（拡張予定）
 
 PyTorch は `fit` / `predict` を持たないため、学習・評価ループ全体を `eval_fn` に委譲する設計とする。
 
@@ -213,7 +230,7 @@ class PyTorchAdapter(ModelAdapterBase):
 
 ---
 
-## 6. アダプターの解決方法
+## 7. アダプターの解決方法
 
 `HPOAgent._resolve_adapter()` がモデルオブジェクトの型を検査し、適切なアダプターと使用する `ParamSpace` を決定して返す。
 
@@ -222,8 +239,13 @@ def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace]:
     model = self._config.model
     if isinstance(model, lgb.LGBMModel):
         adapter = LightGBMAdapter(model, self._config.eval_fn, ...)
+    elif isinstance(model, BaseEstimator):
+        if self._config.param_space is None:
+            raise ValueError(
+                "scikit-learn モデルを使用する場合は param_space の指定が必須です。"
+            )
+        adapter = SklearnAdapter(model, self._config.eval_fn, ...)
     else:
-        # 将来拡張：sklearn / PyTorch
         raise TypeError(f"Unsupported model type: {type(model)}")
 
     # ユーザー指定の param_space を優先。未指定の場合はアダプターのデフォルトを使用
@@ -233,15 +255,15 @@ def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace]:
 
 ### モデル型とアダプターの対応表
 
-| モデルの型 | 使用するアダプター | MVP 対応 |
+| モデルの型 | 使用するアダプター | 対応 |
 |-----------|----------------|---------|
 | `lgb.LGBMModel` のサブクラス | `LightGBMAdapter` | Yes |
-| `sklearn.base.BaseEstimator` のサブクラス | `SklearnAdapter` | No（拡張予定） |
+| `sklearn.base.BaseEstimator` のサブクラス | `SklearnAdapter` | Yes |
 | `torch.nn.Module` のサブクラス | `PyTorchAdapter` | No（拡張予定） |
 
 ---
 
-## 7. クラス図（Mermaid）
+## 8. クラス図（Mermaid）
 
 ```mermaid
 classDiagram
@@ -294,7 +316,7 @@ classDiagram
     }
 
     ModelAdapterBase <|-- LightGBMAdapter : implements
-    ModelAdapterBase <|-- SklearnAdapter : implements（拡張予定）
+    ModelAdapterBase <|-- SklearnAdapter : implements
     ModelAdapterBase <|-- PyTorchAdapter : implements（拡張予定）
     ModelAdapterBase --> ParamSpace : returns
     ParamSpace "1" --> "*" ParamSpec : contains
@@ -303,12 +325,12 @@ classDiagram
 
 ---
 
-## 8. 実装上の注意点
+## 9. 実装上の注意点
 
 | 項目 | 内容 | 対応箇所 |
 |------|------|---------|
 | モデルのディープコピー | `evaluate()` は毎回 `copy.deepcopy(model)` を行い、元のモデルオブジェクトを変更しない | `LightGBMAdapter.evaluate()` |
 | sklearn は `clone()` を使用 | `copy.deepcopy` ではなく `sklearn.base.clone()` を使うことで fitted な状態をリセットできる | `SklearnAdapter.evaluate()` |
 | スコアの方向統一 | `eval_fn` は **大きいほど良いスコア** を返す規約とする。損失関数を使う場合はユーザー側で符号反転する | `ModelAdapterBase.evaluate()` の契約 |
-| パラメータ空間のカスタマイズ | MVP では LightGBM のデフォルト空間を固定するが、将来的に `HPOAgent` 引数でユーザーが上書き可能にする設計を想定する | `LightGBMAdapter.get_param_space()` |
+| sklearn の param_space 必須指定 | `SklearnAdapter` はデフォルトパラメータ空間を持たない。sklearn モデル使用時は `HPOAgent` に `param_space` を必ず指定する。未指定の場合は `ValueError` を送出する | `HPOAgent._resolve_adapter()` |
 | `log=True` の制約 | 対数スケールを使用する場合、`low > 0` である必要がある。バリデーションは `ParamSpec.__post_init__()` で行う | `ParamSpec` |

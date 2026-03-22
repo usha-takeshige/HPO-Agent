@@ -595,3 +595,41 @@ class TestHPOAgent:
         )
         with pytest.raises(TypeError):
             agent._resolve_adapter()
+
+
+# ---------------------------------------------------------------------------
+# SklearnAdapter（CMP-27〜29）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.component
+class TestSklearnAdapter:
+    """SklearnAdapter のコンポーネントテスト。"""
+
+    def test_evaluate_does_not_mutate_model(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-27: evaluate() 後に元モデルが fit されていない（clone 確認）。"""
+        from hpo_agent.adapters import SklearnAdapter
+
+        model, eval_fn, X, y = sklearn_binary_setup
+        adapter = SklearnAdapter(model=model, eval_fn=eval_fn, X=X, y=y)
+        assert not hasattr(model, "estimators_")  # fit 前は estimators_ なし
+        adapter.evaluate({"n_estimators": 5})
+        assert not hasattr(model, "estimators_")  # evaluate 後も元モデルは未学習
+
+    def test_get_default_param_space_raises(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-28: get_default_param_space() は NotImplementedError を送出する。"""
+        from hpo_agent.adapters import SklearnAdapter
+
+        model, eval_fn, X, y = sklearn_binary_setup
+        adapter = SklearnAdapter(model=model, eval_fn=eval_fn, X=X, y=y)
+        with pytest.raises(NotImplementedError):
+            adapter.get_default_param_space()
+
+    def test_resolve_adapter_without_param_space_raises(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-29: sklearn モデルで param_space を省略すると ValueError。"""
+        from hpo_agent.agent import HPOAgent
+
+        model, eval_fn, X, y = sklearn_binary_setup
+        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        with pytest.raises(ValueError, match="param_space"):
+            agent._resolve_adapter()
