@@ -534,13 +534,18 @@ class TestAutoParamSpaceGeneration:
         ):
             from hpo_agent.models import HPOResult
 
-            mock_gen.return_value = mock_param_space_llm.with_structured_output(
-                None
-            ).invoke(None).to_param_space()
+            mock_gen.return_value = (
+                mock_param_space_llm.with_structured_output(None)
+                .invoke(None)
+                .to_param_space()
+            )
 
             mock_supervisor = MagicMock()
             mock_supervisor.run.return_value = HPOResult(
-                best_params={}, best_score=0.0, trials_df=__import__("pandas").DataFrame(), report=""
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
             )
             mock_build.return_value = mock_supervisor
 
@@ -572,7 +577,10 @@ class TestAutoParamSpaceGeneration:
         ):
             mock_supervisor = MagicMock()
             mock_supervisor.run.return_value = HPOResult(
-                best_params={}, best_score=0.0, trials_df=__import__("pandas").DataFrame(), report=""
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
             )
             mock_build.return_value = mock_supervisor
 
@@ -604,7 +612,10 @@ class TestAutoParamSpaceGeneration:
 
             mock_supervisor = MagicMock()
             mock_supervisor.run.return_value = HPOResult(
-                best_params={}, best_score=0.0, trials_df=__import__("pandas").DataFrame(), report=""
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
             )
             mock_build.return_value = mock_supervisor
 

@@ -93,9 +93,7 @@ class ParamSpaceSchema(BaseModel):
     ParamSpace の Pydantic 版。to_param_space() で frozen dataclass に変換する。
     """
 
-    specs: list[ParamSpecSchema] = Field(
-        description="ハイパーパラメータ仕様のリスト"
-    )
+    specs: list[ParamSpecSchema] = Field(description="ハイパーパラメータ仕様のリスト")
 
     def to_param_space(self) -> ParamSpace:
         """ParamSpace frozen dataclass に変換する。"""

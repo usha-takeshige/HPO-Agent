@@ -253,7 +253,12 @@ def mock_param_space_llm(simple_param_space: ParamSpace) -> MagicMock:
     schema = ParamSpaceSchema.model_validate(
         {
             "specs": [
-                {"name": spec.name, "type": spec.type, "low": spec.low, "high": spec.high}
+                {
+                    "name": spec.name,
+                    "type": spec.type,
+                    "low": spec.low,
+                    "high": spec.high,
+                }
                 for spec in simple_param_space.specs
                 if spec.type != "categorical"
             ]
