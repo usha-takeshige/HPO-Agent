@@ -141,6 +141,18 @@ def deterministic_eval_fn():  # type: ignore[no-untyped-def]
     return eval_fn
 
 
+@pytest.fixture
+def narrow_search_space_tool(simple_param_space: ParamSpace) -> Any:
+    """NarrowSearchSpaceTool フィクスチャ（simple_param_space を使用）。"""
+    from hpo_agent.tools import NarrowSearchSpaceTool
+
+    return NarrowSearchSpaceTool(
+        param_space=simple_param_space,
+        name="narrow_search_space",
+        description="test",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fixtures: LightGBM セットアップ（A-2/A-3 テスト用）
 # ---------------------------------------------------------------------------
@@ -161,3 +173,69 @@ def lgbm_binary_setup():  # type: ignore[no-untyped-def]
         return float(accuracy_score(y, m.predict(X)))
 
     return model, eval_fn, X, y
+
+
+# ---------------------------------------------------------------------------
+# Fixtures: sklearn セットアップ（CMP-27〜29 テスト用）
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sklearn_binary_setup():  # type: ignore[no-untyped-def]
+    """軽量な sklearn RandomForestClassifier 二値分類のセットアップ。"""
+    from sklearn.datasets import make_classification
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import accuracy_score
+
+    X, y = make_classification(n_samples=200, n_features=5, random_state=42)
+    model = RandomForestClassifier(n_estimators=5, random_state=42)
+
+    def eval_fn(m: Any, X: Any, y: Any) -> float:
+        """精度を評価関数として返す。"""
+        return float(accuracy_score(y, m.predict(X)))
+
+    return model, eval_fn, X, y
+
+
+# ---------------------------------------------------------------------------
+# Fixtures: PyTorch セットアップ（CMP-30〜34 テスト用）
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def pytorch_setup() -> tuple[Any, Any, ParamSpace]:
+    """実際の torch.nn.Module を使った軽量 PyTorch セットアップ。
+
+    SimpleNet は Linear 層1つの最小構成。
+    eval_fn は学習なしの forward pass でスコアを返す（テストの高速化のため）。
+    """
+    import torch
+    import torch.nn as nn
+
+    class SimpleNet(nn.Module):
+        """テスト用の単純な全結合ネットワーク。"""
+
+        def __init__(self, hidden_size: int) -> None:
+            """SimpleNet を初期化する。"""
+            super().__init__()
+            self.fc = nn.Linear(10, hidden_size)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            """forward パスを実行する。"""
+            return self.fc(x)
+
+    def model_fn(params: dict[str, Any]) -> nn.Module:
+        """パラメータを受け取り SimpleNet を返すファクトリ関数。"""
+        return SimpleNet(hidden_size=int(params["hidden_size"]))
+
+    def eval_fn(model: nn.Module) -> float:
+        """forward pass の出力絶対値平均をスコアとして返す。"""
+        x = torch.randn(5, 10)
+        with torch.no_grad():
+            out = model(x)
+        return float(out.abs().mean().item())
+
+    param_space = ParamSpace(
+        specs=(ParamSpec(name="hidden_size", type="int", low=4, high=32),)
+    )
+    return model_fn, eval_fn, param_space

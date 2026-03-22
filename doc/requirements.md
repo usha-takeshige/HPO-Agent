@@ -33,7 +33,7 @@ MVP（最小実装）として LightGBM を対象とする。
 | フェーズ | 対応モデル | 備考 |
 |---|---|---|
 | MVP | LightGBM | 初期評価・動作検証 |
-| 拡張予定 | scikit-learn 系モデル | fit/predict インターフェース準拠 |
+| 対応済み | scikit-learn 系モデル | fit/predict インターフェース準拠。param_space の指定が必須 |
 | 拡張予定 | PyTorch / TensorFlow | カスタム eval 関数で対応 |
 
 ### 2.2 対象外

@@ -7,8 +7,14 @@ from collections.abc import Callable
 from typing import Any
 
 from dotenv import load_dotenv
+from langchain_core.tools import BaseTool
 
-from hpo_agent.adapters import LightGBMAdapter, ModelAdapterBase
+from hpo_agent.adapters import (
+    LightGBMAdapter,
+    ModelAdapterBase,
+    PyTorchAdapter,
+    SklearnAdapter,
+)
 from hpo_agent.models import HPOConfig, HPOResult, ParamSpace
 from hpo_agent.prompts import (
     EXPERT_AGENT_DEFAULT_PROMPT,
@@ -21,7 +27,7 @@ from hpo_agent.supervisor import Supervisor
 from hpo_agent.tools import (
     BayesianOptimizationTool,
     ExpertAgentTool,
-    HPOToolBase,
+    NarrowSearchSpaceTool,
     SobolSearchTool,
 )
 
@@ -32,13 +38,28 @@ class HPOAgent:
     依存解決（アダプター・LLM プロバイダー・ツール）を行い、
     Supervisor を構築して実行する。
 
+    LightGBM の場合:
+        model に lgb.LGBMModel インスタンスを渡す。eval_fn のシグネチャは
+        (model, X, y) -> float。X, y は必須。
+
+    PyTorch の場合:
+        model にモデルファクトリ関数 (params: dict) -> model を渡す。
+        eval_fn のシグネチャは (model) -> float（学習・評価ループ全体を含む）。
+        X, y は不要。param_space の指定が必須。
+
     Args:
-        model: チューニング対象モデル。現在 LightGBM のみサポート。
-        eval_fn: 評価関数。シグネチャ: (model, X, y) -> float。大きいほど良いスコア。
+        model: チューニング対象モデルまたはモデルファクトリ関数。
+            LightGBM: lgb.LGBMModel のインスタンス。
+            sklearn: sklearn.base.BaseEstimator のサブクラスインスタンス。
+            PyTorch: パラメータ辞書を受け取りモデルを返す callable。
+        eval_fn: 評価関数。大きいほど良いスコア。
+            LightGBM / sklearn: (model, X, y) -> float。
+            PyTorch: (model) -> float（学習・評価ループ全体）。
         n_trials: 総試行回数。
-        X: 特徴量データ。
-        y: ターゲットデータ。
-        param_space: 最適化対象パラメータ空間。None の場合はアダプターのデフォルトを使用。
+        X: 特徴量データ（LightGBM のみ使用）。
+        y: ターゲットデータ（LightGBM のみ使用）。
+        param_space: 最適化対象パラメータ空間。PyTorch では必須。
+            LightGBM で None の場合はアダプターのデフォルトを使用。
         seed: 乱数シード。None の場合は非決定的。
         prompts: エージェント別追加プロンプト辞書。キー: "supervisor", "expert_agent"。
         llm_model: LLM モデル名（.env 設定の上書き用）。
@@ -49,8 +70,8 @@ class HPOAgent:
         model: Any,
         eval_fn: Callable[..., float],
         n_trials: int,
-        X: Any,
-        y: Any,
+        X: Any = None,
+        y: Any = None,
         param_space: ParamSpace | None = None,
         seed: int | None = None,
         prompts: dict[str, str] | None = None,
@@ -87,10 +108,13 @@ class HPOAgent:
 
         Raises:
             TypeError: 未対応のモデル型の場合。
+            ValueError: scikit-learn / PyTorch モデルで param_space が未指定の場合。
         """
         import lightgbm as lgb
+        from sklearn.base import BaseEstimator  # type: ignore[import-untyped]
 
         model = self._config.model
+        adapter: ModelAdapterBase
         if isinstance(model, lgb.LGBMModel):
             adapter = LightGBMAdapter(
                 model=model,
@@ -98,10 +122,32 @@ class HPOAgent:
                 X=self._config.X,
                 y=self._config.y,
             )
+        elif isinstance(model, BaseEstimator):
+            if self._config.param_space is None:
+                raise ValueError(
+                    "scikit-learn モデルを使用する場合は param_space の指定が必須です。"
+                )
+            adapter = SklearnAdapter(
+                model=model,
+                eval_fn=self._config.eval_fn,
+                X=self._config.X,
+                y=self._config.y,
+            )
+        elif callable(model):
+            if self._config.param_space is None:
+                raise ValueError(
+                    "PyTorch モデルを使用する場合は param_space の指定が必須です。"
+                )
+            adapter = PyTorchAdapter(
+                model_fn=model,
+                eval_fn=self._config.eval_fn,
+                param_space=self._config.param_space,
+            )
         else:
             raise TypeError(
                 f"Unsupported model type: {type(model)}. "
-                "Currently only LightGBM models are supported."
+                "Supported: LightGBM (lgb.LGBMModel), scikit-learn (BaseEstimator subclasses), "
+                "PyTorch (callable な model_fn)。"
             )
 
         param_space = self._config.param_space or adapter.get_default_param_space()
@@ -136,7 +182,7 @@ class HPOAgent:
             EXPERT_AGENT_DEFAULT_PROMPT,
             self._config.prompts.get("expert_agent"),
         )
-        tools: list[HPOToolBase] = [
+        tools: list[BaseTool] = [
             SobolSearchTool(
                 adapter=adapter,
                 param_space=param_space,
@@ -158,6 +204,15 @@ class HPOAgent:
                 system_prompt=expert_system_prompt,
                 name="expert_agent",
                 description="専門家 AI エージェントによる決め打ち探索",
+            ),
+            NarrowSearchSpaceTool(
+                param_space=param_space,
+                name="narrow_search_space",
+                description=(
+                    "過去の探索結果をもとに探索空間を狭める。"
+                    "param_updates に JSON 文字列で新しい範囲を指定する。"
+                    '例: [{"name": "learning_rate", "low": 0.05, "high": 0.1}]'
+                ),
             ),
         ]
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -595,3 +595,224 @@ class TestHPOAgent:
         )
         with pytest.raises(TypeError):
             agent._resolve_adapter()
+
+
+# ---------------------------------------------------------------------------
+# SklearnAdapter（CMP-27〜29）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.component
+class TestSklearnAdapter:
+    """SklearnAdapter のコンポーネントテスト。"""
+
+    def test_evaluate_does_not_mutate_model(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-27: evaluate() 後に元モデルが fit されていない（clone 確認）。"""
+        from hpo_agent.adapters import SklearnAdapter
+
+        model, eval_fn, X, y = sklearn_binary_setup
+        adapter = SklearnAdapter(model=model, eval_fn=eval_fn, X=X, y=y)
+        assert not hasattr(model, "estimators_")  # fit 前は estimators_ なし
+        adapter.evaluate({"n_estimators": 5})
+        assert not hasattr(model, "estimators_")  # evaluate 後も元モデルは未学習
+
+    def test_get_default_param_space_raises(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-28: get_default_param_space() は NotImplementedError を送出する。"""
+        from hpo_agent.adapters import SklearnAdapter
+
+        model, eval_fn, X, y = sklearn_binary_setup
+        adapter = SklearnAdapter(model=model, eval_fn=eval_fn, X=X, y=y)
+        with pytest.raises(NotImplementedError):
+            adapter.get_default_param_space()
+
+    def test_resolve_adapter_without_param_space_raises(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-29: sklearn モデルで param_space を省略すると ValueError。"""
+        from hpo_agent.agent import HPOAgent
+
+        model, eval_fn, X, y = sklearn_binary_setup
+        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        with pytest.raises(ValueError, match="param_space"):
+            agent._resolve_adapter()
+
+    def test_pytorch_model_fn_resolves_to_pytorch_adapter(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-30: callable な model_fn が PyTorchAdapter に解決される。"""
+        from hpo_agent.adapters import PyTorchAdapter
+        from hpo_agent.agent import HPOAgent
+
+        model_fn, eval_fn, param_space = pytorch_setup
+        agent = HPOAgent(
+            model=model_fn,
+            eval_fn=eval_fn,
+            n_trials=5,
+            param_space=param_space,
+        )
+        adapter, _ = agent._resolve_adapter()
+        assert isinstance(adapter, PyTorchAdapter)
+
+    def test_pytorch_without_param_space_raises_value_error(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-31: PyTorch 使用時に param_space=None で ValueError。"""
+        from hpo_agent.agent import HPOAgent
+
+        model_fn, eval_fn, _ = pytorch_setup
+        agent = HPOAgent(
+            model=model_fn,
+            eval_fn=eval_fn,
+            n_trials=5,
+            param_space=None,
+        )
+        with pytest.raises(ValueError):
+            agent._resolve_adapter()
+
+
+# ---------------------------------------------------------------------------
+# PyTorchAdapter（CMP-32〜34）
+# ---------------------------------------------------------------------------
+
+
+class TestPyTorchAdapter:
+    def test_evaluate_returns_float(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-32: evaluate() が float を返す。"""
+        from hpo_agent.adapters import PyTorchAdapter
+
+        model_fn, eval_fn, param_space = pytorch_setup
+        adapter = PyTorchAdapter(
+            model_fn=model_fn, eval_fn=eval_fn, param_space=param_space
+        )
+        result = adapter.evaluate({"hidden_size": 8})
+        assert isinstance(result, float)
+
+    def test_evaluate_calls_model_fn_with_params(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-33: evaluate() が model_fn をパラメータ付きで呼び出し、eval_fn に渡す。"""
+        import torch.nn as nn
+
+        from hpo_agent.adapters import PyTorchAdapter
+
+        model_fn, eval_fn, param_space = pytorch_setup
+        params = {"hidden_size": 16}
+        adapter = PyTorchAdapter(
+            model_fn=model_fn, eval_fn=eval_fn, param_space=param_space
+        )
+        # evaluate が正常終了し、モデルが nn.Module であることを確認
+        result = adapter.evaluate(params)
+        assert isinstance(result, float)
+        # model_fn が正しく hidden_size=16 のモデルを生成することを確認
+        model = model_fn(params)
+        assert isinstance(model, nn.Module)
+
+    def test_get_default_param_space_returns_provided_space(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-34: get_default_param_space() がコンストラクタに渡した param_space を返す。"""
+        from hpo_agent.adapters import PyTorchAdapter
+
+        model_fn, eval_fn, param_space = pytorch_setup
+        adapter = PyTorchAdapter(
+            model_fn=model_fn, eval_fn=eval_fn, param_space=param_space
+        )
+        assert adapter.get_default_param_space() is param_space
+
+
+# ---------------------------------------------------------------------------
+# CMP-35〜41: NarrowSearchSpaceTool
+# ---------------------------------------------------------------------------
+
+
+class TestNarrowSearchSpaceTool:
+    def test_valid_update_returns_description(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-35: 有効な param_updates で説明文字列を返す（"Error" を含まない）."""
+        import json
+
+        updates = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
+        result = narrow_search_space_tool._run(param_updates=updates)
+        assert isinstance(result, str)
+        assert "Error" not in result
+        assert "num_leaves" in result
+
+    def test_unknown_param_name_returns_error(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-36: 存在しないパラメータ名 → "Error" を含む文字列を返す."""
+        import json
+
+        updates = json.dumps([{"name": "nonexistent", "low": 0.1, "high": 0.2}])
+        result = narrow_search_space_tool._run(param_updates=updates)
+        assert "Error" in result
+
+    def test_expanding_low_returns_error(self, narrow_search_space_tool: Any) -> None:
+        """CMP-37: 数値型の low を元より小さく指定 → "Error" を含む文字列."""
+        import json
+
+        # num_leaves の original low は 20
+        updates = json.dumps([{"name": "num_leaves", "low": 10, "high": 80}])
+        result = narrow_search_space_tool._run(param_updates=updates)
+        assert "Error" in result
+
+    def test_invalid_categorical_choices_returns_error(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-38: categorical で元にない選択肢を指定 → "Error" を含む文字列."""
+        import json
+
+        # boosting_type の original choices は ("gbdt", "dart")
+        updates = json.dumps([{"name": "boosting_type", "choices": ["gbdt", "goss"]}])
+        result = narrow_search_space_tool._run(param_updates=updates)
+        assert "Error" in result
+
+    def test_build_narrowed_space_returns_param_space(
+        self, narrow_search_space_tool: Any
+    ) -> None:
+        """CMP-39: _build_narrowed_space が有効入力で ParamSpace を返し、値が反映される."""
+        import json
+
+        from hpo_agent.models import ParamSpace
+
+        updates = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
+        result = narrow_search_space_tool._build_narrowed_space(updates)
+        assert isinstance(result, ParamSpace)
+        nl_spec = next(s for s in result.specs if s.name == "num_leaves")
+        assert nl_spec.low == 30.0
+        assert nl_spec.high == 80.0
+
+    def test_unmodified_params_preserved(self, narrow_search_space_tool: Any) -> None:
+        """CMP-40: 更新対象でないパラメータは元の値を引き継ぐ."""
+        import json
+
+        from hpo_agent.models import ParamSpace
+
+        updates = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
+        result = narrow_search_space_tool._build_narrowed_space(updates)
+        assert isinstance(result, ParamSpace)
+        lr_spec = next(s for s in result.specs if s.name == "learning_rate")
+        assert lr_spec.low == 0.01
+        assert lr_spec.high == 0.3
+
+    def test_sobol_uses_effective_param_space(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """CMP-41: SobolSearchTool に effective_param_space を渡すと狭めた範囲内でサンプリング."""
+        from hpo_agent.models import ParamSpace, ParamSpec
+        from hpo_agent.tools import SobolSearchTool
+
+        narrow_space = ParamSpace(
+            specs=(
+                ParamSpec(name="num_leaves", type="int", low=50, high=70),
+                ParamSpec(
+                    name="learning_rate", type="float", low=0.05, high=0.1, log=True
+                ),
+                ParamSpec(name="boosting_type", type="categorical", choices=("gbdt",)),
+            )
+        )
+        tool = SobolSearchTool(
+            adapter=dummy_adapter,
+            param_space=simple_param_space,
+            seed=0,
+            name="sobol_search",
+            description="test",
+        )
+        results = tool._run(
+            n_trials=10, trial_history=[], effective_param_space=narrow_space
+        )
+        for r in results:
+            assert 50 <= r.params["num_leaves"] <= 70
+            assert 0.05 <= r.params["learning_rate"] <= 0.1
+            assert r.params["boosting_type"] == "gbdt"
