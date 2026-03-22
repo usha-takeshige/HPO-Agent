@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+import pathlib
 from typing import Any
 
 import torch
@@ -149,11 +150,23 @@ def main() -> None:
     print(f"最良スコア（負の MSE）: {result.best_score:.4f}")
     print(f"最良パラメータ: {result.best_params}\n")
 
+    # 試行履歴 CSV 出力
+    output_dir = pathlib.Path(__file__).parent / "output"
+    output_dir.mkdir(exist_ok=True)
+    csv_path = output_dir / "pytorch_trials.csv"
+    result.trials_df.to_csv(csv_path, index=False, encoding="utf-8")
+    print(f"試行履歴を保存しました: {csv_path}\n")
+
     print("=== 試行履歴（先頭5件）===")
     print(result.trials_df.head())
 
+    # Markdown レポート出力
     print("\n=== レポート ===")
     print(result.report)
+    report_path = output_dir / "pytorch_hpo_report.md"
+    with open(report_path, "w") as f:
+        f.write(result.report)
+    print(f"レポートを保存しました: {report_path}")
 
 
 if __name__ == "__main__":
