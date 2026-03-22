@@ -34,7 +34,7 @@ MVP（最小実装）として LightGBM を対象とする。
 |---|---|---|
 | MVP | LightGBM | 初期評価・動作検証 |
 | 対応済み | scikit-learn 系モデル | fit/predict インターフェース準拠。param_space の指定が必須 |
-| 拡張予定 | PyTorch / TensorFlow | カスタム eval 関数で対応 |
+| 対応済み | PyTorch | `model_fn: (params) -> model` + `eval_fn: (model) -> float` で対応。param_space の指定が必須。 |
 
 ### 2.2 対象外
 
@@ -76,8 +76,8 @@ print(result.best_params)     # 最良パラメータ
 | パラメータ | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `model` | `Any` | Yes | チューニング対象のモデルオブジェクト |
-| `X` | `Any` | Yes | 学習に使用する特徴量データ |
-| `y` | `Any` | Yes | 学習に使用するターゲットデータ |
+| `X` | `Any` | No | 学習に使用する特徴量データ。LightGBM / sklearn モデルでは必須。PyTorch モデルでは不要。 |
+| `y` | `Any` | No | 学習に使用するターゲットデータ。LightGBM / sklearn モデルでは必須。PyTorch モデルでは不要。 |
 | `eval_fn` | `Callable` | Yes | ユーザー定義の評価関数。スコア（float）を返す |
 | `n_trials` | `int` | Yes | HPO の総試行回数 |
 | `param_space` | `ParamSpace` | No | 最適化対象のハイパーパラメーターを指定する。指定がない場合はモデルアダプターのデフォルト空間を使用する |
@@ -123,6 +123,7 @@ print(result.best_params)     # 最良パラメータ
 | `BayesianOptimizationTool` | ベイズ最適化による探索（Optuna 等を利用） | MVP |
 | `SobolSearchTool` | Sobol 列による準ランダム探索 | MVP |
 | `ExpertAgentTool` | 専門家 AI エージェントによる決め打ち探索 | MVP |
+| `NarrowSearchSpaceTool` | 過去の探索結果をもとに探索空間を動的に狭める | MVP |
 
 > ツールはインターフェースを定義し、追加・差し替えが容易な設計とする。
 

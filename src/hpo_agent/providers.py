@@ -15,8 +15,12 @@ class LLMProviderBase(ABC):
     """
 
     @abstractmethod
-    def get_llm(self) -> BaseChatModel:
-        """LLM インスタンスを返す。"""
+    def get_llm(self, temperature: float = 0) -> BaseChatModel:
+        """LLM インスタンスを返す。
+
+        Args:
+            temperature: サンプリング温度。0 は確定的、高いほど多様な出力。
+        """
         ...
 
 
@@ -33,12 +37,16 @@ class GoogleLLMProvider(LLMProviderBase):
         self._api_key = api_key
         self._model_name = model_name
 
-    def get_llm(self) -> BaseChatModel:
-        """Google Gemini の LLM インスタンスを返す。"""
+    def get_llm(self, temperature: float = 0) -> BaseChatModel:
+        """Google Gemini の LLM インスタンスを返す。
+
+        Args:
+            temperature: サンプリング温度。0 は確定的、高いほど多様な出力。
+        """
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         return ChatGoogleGenerativeAI(
             model=self._model_name,
             google_api_key=self._api_key,
-            temperature=0,
+            temperature=temperature,
         )

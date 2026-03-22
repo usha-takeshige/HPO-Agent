@@ -268,6 +268,91 @@ class TestSupervisorLoop:
         all_content = " ".join(str(m.content) for m in messages)
         assert "テスト指示" in all_content
 
+    def test_expert_prompt_in_expert_agent_call(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """AGT-09: ExpertAgentTool の LLM 呼び出しに追加プロンプトが含まれる."""
+        from hpo_agent.models import HPOConfig
+        from hpo_agent.prompts import EXPERT_AGENT_DEFAULT_PROMPT, build_system_prompt
+        from hpo_agent.report import ReportGenerator
+        from hpo_agent.supervisor import Supervisor
+        from hpo_agent.tools import (
+            BayesianOptimizationTool,
+            ExpertAgentTool,
+            SobolSearchTool,
+        )
+
+        expert_llm = MagicMock()
+        expert_llm.invoke.return_value.content = '{"reasoning": "ok", "params": {"num_leaves": 64, "learning_rate": 0.05, "boosting_type": "gbdt"}}'
+
+        supervisor_llm = MagicMock()
+        supervisor_llm.bind_tools.return_value = supervisor_llm
+        supervisor_llm.invoke.side_effect = [
+            AIMessage(
+                content="expert_agent を実行します。",
+                tool_calls=[
+                    {"name": "expert_agent", "args": {"n_trials": 1}, "id": "c1"}
+                ],
+            ),
+            AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),
+        ]
+
+        user_expert_prompt = "専門家指示: 正則化を重視"
+        expert_system_prompt = build_system_prompt(
+            EXPERT_AGENT_DEFAULT_PROMPT, user_expert_prompt
+        )
+
+        config = HPOConfig(
+            model=object(),
+            eval_fn=lambda m, X, y: 0.0,
+            n_trials=5,
+            X=None,
+            y=None,
+        )
+        tools = [
+            SobolSearchTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                name="sobol_search",
+                description="test",
+            ),
+            BayesianOptimizationTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                name="bayesian_optimization",
+                description="test",
+            ),
+            ExpertAgentTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                llm=expert_llm,
+                system_prompt=expert_system_prompt,
+                name="expert_agent",
+                description="test",
+            ),
+        ]
+        supervisor = Supervisor(
+            llm=supervisor_llm,
+            tools=tools,
+            report_generator=ReportGenerator(),
+            system_prompt="test",
+        )
+        supervisor.run(config)
+
+        # ExpertAgentTool の LLM に追加プロンプトが含まれるか確認
+        call_args = expert_llm.invoke.call_args_list[0]
+        messages = call_args[0][0]
+        system_content = next(
+            (
+                str(m.content)
+                for m in messages
+                if hasattr(m, "type") and m.type == "system"
+            ),
+            "",
+        )
+        assert "専門家指示" in system_content
+
 
 class TestSeedPropagation:
     def test_seed_propagated_to_sobol(
@@ -327,6 +412,21 @@ class TestSeedPropagation:
         )
         supervisor.run(config)
         assert sobol_tool.seed == 42
+
+    def test_seed_propagated_to_bayesian(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """AGT-12: seed=42 が BayesianOptimizationTool に伝播される."""
+        from hpo_agent.tools import BayesianOptimizationTool
+
+        bayesian_tool = BayesianOptimizationTool(
+            adapter=dummy_adapter,
+            param_space=simple_param_space,
+            seed=42,
+            name="bayesian_optimization",
+            description="test",
+        )
+        assert bayesian_tool.seed == 42
 
 
 class TestHistoryPassthrough:
