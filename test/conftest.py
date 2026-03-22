@@ -161,3 +161,25 @@ def lgbm_binary_setup():  # type: ignore[no-untyped-def]
         return float(accuracy_score(y, m.predict(X)))
 
     return model, eval_fn, X, y
+
+
+# ---------------------------------------------------------------------------
+# Fixtures: sklearn セットアップ（CMP-27〜29 テスト用）
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sklearn_binary_setup():  # type: ignore[no-untyped-def]
+    """軽量な sklearn RandomForestClassifier 二値分類のセットアップ。"""
+    from sklearn.datasets import make_classification
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import accuracy_score
+
+    X, y = make_classification(n_samples=200, n_features=5, random_state=42)
+    model = RandomForestClassifier(n_estimators=5, random_state=42)
+
+    def eval_fn(m: Any, X: Any, y: Any) -> float:
+        """精度を評価関数として返す。"""
+        return float(accuracy_score(y, m.predict(X)))
+
+    return model, eval_fn, X, y
