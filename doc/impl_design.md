@@ -34,6 +34,7 @@
 | `BayesianOptimizationTool` | 具象クラス | Optuna によるベイズ最適化を実行する | 4.3 BayesianOptimizationTool |
 | `SobolSearchTool` | 具象クラス | Sobol 列による準ランダム探索を実行する | 4.3 SobolSearchTool |
 | `ExpertAgentTool` | 具象クラス | 専門家 AI エージェントによる決め打ち探索を実行する | 4.3 ExpertAgentTool |
+| `NarrowSearchSpaceTool` | 具象クラス | 過去の探索結果をもとに探索空間を狭め、`current_param_space` を更新する | 探索空間の動的絞り込み |
 | `ReportGenerator` | 具象クラス | 試行履歴から Markdown レポートを生成する | 6.2 テキストレポート |
 | `Supervisor` | 具象クラス | LangGraph グラフを構築し、ツール選択ループを制御する | 4.2 スーパーバイザーエージェント |
 | `HPOAgent` | 具象クラス | ユーザーに公開するエントリーポイントとして run() を提供する | 3.1 基本的な使い方 |
@@ -170,8 +171,9 @@ class SupervisorState(BaseModel):
     trial_records: list[TrialRecord]
     remaining_trials: int
     config: HPOConfig
-    current_report: str = ""          # 直近の中間レポート（ツール実行ごとに更新）
-    last_tool_reasoning: str = ""     # 直前のツール選択理由（Supervisor が出力した理由）
+    current_report: str = ""                       # 直近の中間レポート（ツール実行ごとに更新）
+    last_tool_reasoning: str = ""                  # 直前のツール選択理由（Supervisor が出力した理由）
+    current_param_space: ParamSpace | None = None  # narrow_search_space による絞り込み後の空間
 ```
 
 **SOLIDチェック**
@@ -376,6 +378,29 @@ class ExpertAgentTool(HPOToolBase):
 **SOLIDチェック**
 - S: LLM による決め打ち探索の実行のみが責務
 - D: `BaseChatModel` の抽象に依存し、特定 LLM に依存しない
+
+---
+
+#### `NarrowSearchSpaceTool`
+
+**種別**：具象クラス（BaseTool）
+**責務**：LLM から受け取った `param_updates` を検証して `ParamSpace` を更新する。試行は実行しない。
+**対応する要件の概念**：探索空間の動的絞り込み
+
+```python
+class NarrowSearchSpaceTool(BaseTool):
+    name: str = "narrow_search_space"
+    description: str = "過去の探索結果をもとに探索空間を狭める"
+    param_space: ParamSpace
+
+    def _run(self, param_updates: str) -> str: ...
+    def _build_narrowed_space(self, param_updates: str) -> ParamSpace | str: ...
+    def _describe_param_space(self, param_space: ParamSpace) -> str: ...
+```
+
+**SOLIDチェック**
+- S: 探索空間の更新のみが責務（試行の実行は行わない）
+- L: `BaseTool` の契約を守る（`_run` が str を返す）
 
 ---
 
@@ -647,6 +672,7 @@ classDiagram
         +config: HPOConfig
         +current_report: str
         +last_tool_reasoning: str
+        +current_param_space: ParamSpace
     }
 
     class LLMProviderBase {
@@ -698,6 +724,13 @@ classDiagram
         +_run(n_trials: int, trial_history: list) list
     }
 
+    class NarrowSearchSpaceTool {
+        -param_space: ParamSpace
+        +_run(param_updates: str) str
+        +_build_narrowed_space(param_updates: str) ParamSpace
+        +_describe_param_space(param_space: ParamSpace) str
+    }
+
     class ReportGenerator {
         +generate_intermediate(records: list, best_params: dict, best_score: float, seed, tool_reasoning, current_tool_records, title) str
         +generate_final(records: list, best_params: dict, best_score: float, llm: BaseChatModel, seed) str
@@ -745,6 +778,7 @@ classDiagram
     HPOToolBase <|-- SobolSearchTool : implements
     HPOToolBase <|-- ExpertAgentTool : implements
 
+    Supervisor --> NarrowSearchSpaceTool : uses
     Supervisor --> SupervisorState : manages
     Supervisor --> HPOToolBase : invokes
     Supervisor --> ReportGenerator : uses
