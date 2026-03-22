@@ -24,7 +24,7 @@ from hpo_agent.prompts import (
     SUPERVISOR_DEFAULT_PROMPT,
     build_system_prompt,
 )
-from hpo_agent.providers import GoogleLLMProvider
+from hpo_agent.providers import GoogleLLMProvider, LLMProviderBase, OpenAILLMProvider
 from hpo_agent.report import ReportGenerator
 from hpo_agent.supervisor import Supervisor
 from hpo_agent.tools import (
@@ -213,12 +213,29 @@ class HPOAgent:
                 )
         return lines
 
-    def _resolve_llm_provider(self) -> GoogleLLMProvider:
-        """環境変数から LLM プロバイダーを構築して返す。"""
+    def _resolve_llm_provider(self) -> LLMProviderBase:
+        """環境変数から LLM プロバイダーを構築して返す。
+
+        LLM_PROVIDER 環境変数でプロバイダーを切り替える。
+        未設定または "google" の場合は GoogleLLMProvider を返す。
+        "openai" の場合は OpenAILLMProvider を返す。
+
+        Raises:
+            ValueError: 未サポートの LLM_PROVIDER 値が指定された場合。
+        """
         load_dotenv()
         api_key = os.environ["LLM_API_KEY"]
         model_name = self._config.llm_model or os.environ["LLM_MODEL_NAME"]
-        return GoogleLLMProvider(api_key=api_key, model_name=model_name)
+        provider = os.getenv("LLM_PROVIDER", "google")
+        if provider == "google":
+            return GoogleLLMProvider(api_key=api_key, model_name=model_name)
+        elif provider == "openai":
+            return OpenAILLMProvider(api_key=api_key, model_name=model_name)
+        else:
+            raise ValueError(
+                f"Unsupported LLM_PROVIDER: '{provider}'. "
+                "Supported values: 'google', 'openai'."
+            )
 
     def _build_supervisor(
         self,
