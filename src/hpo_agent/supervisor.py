@@ -7,12 +7,13 @@ from typing import Any, Literal
 
 import pandas as pd
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 
 from hpo_agent.models import HPOConfig, HPOResult, TrialRecord
 from hpo_agent.report import ReportGenerator
 from hpo_agent.state import SupervisorState
-from hpo_agent.tools import HPOToolBase
+from hpo_agent.tools import HPOToolBase, NarrowSearchSpaceTool
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class Supervisor:
 
     Args:
         llm: Supervisor が使用する LLM インスタンス。
-        tools: 使用可能な HPO ツールのリスト。
+        tools: 使用可能なツールのリスト（HPOToolBase および NarrowSearchSpaceTool）。
         report_generator: 中間・最終レポート生成器。
         system_prompt: Supervisor への初期システムプロンプト。
     """
@@ -33,7 +34,7 @@ class Supervisor:
     def __init__(
         self,
         llm: Any,
-        tools: list[HPOToolBase],
+        tools: list[BaseTool],
         report_generator: ReportGenerator,
         system_prompt: str,
     ) -> None:
@@ -42,7 +43,7 @@ class Supervisor:
         self._tools = tools
         self._report_generator = report_generator
         self._system_prompt = system_prompt
-        self._tool_map: dict[str, HPOToolBase] = {t.name: t for t in tools}
+        self._tool_map: dict[str, BaseTool] = {t.name: t for t in tools}
 
     def run(self, config: HPOConfig) -> HPOResult:
         """LangGraph グラフを実行して HPOResult を返す。
@@ -126,12 +127,18 @@ class Supervisor:
                 ]
             }
 
+        # NarrowSearchSpaceTool は試行を実行しない専用処理
+        if isinstance(tool, NarrowSearchSpaceTool):
+            return self._handle_narrow_search_space(tool, args, tool_call_id)
+
+        assert isinstance(tool, HPOToolBase)
         requested_trials = int(args.get("n_trials", 1))
         n_trials = min(requested_trials, state.remaining_trials)
 
         new_records = tool._run(
             n_trials=n_trials,
             trial_history=list(state.trial_records),
+            effective_param_space=state.current_param_space,
         )
 
         # trial_id を既存件数からオフセット
@@ -176,6 +183,42 @@ class Supervisor:
             "trial_records": updated_records,
             "remaining_trials": remaining,
             "current_report": report,
+        }
+
+    def _handle_narrow_search_space(
+        self,
+        tool: NarrowSearchSpaceTool,
+        args: dict[str, Any],
+        tool_call_id: str,
+    ) -> dict[str, Any]:
+        """NarrowSearchSpaceTool の実行結果を処理して current_param_space を更新する。
+
+        Args:
+            tool: NarrowSearchSpaceTool インスタンス。
+            args: ツール呼び出し引数。
+            tool_call_id: ツール呼び出し ID。
+
+        Returns:
+            状態更新辞書。成功時は current_param_space を含む。
+        """
+        param_updates: str = args.get("param_updates", "[]")
+        result = tool._build_narrowed_space(param_updates)
+        if isinstance(result, str):
+            # エラーメッセージをそのまま返す
+            logger.warning("[narrow_search_space] %s", result)
+            return {
+                "messages": [ToolMessage(content=result, tool_call_id=tool_call_id)]
+            }
+        description = tool._describe_param_space(result)
+        logger.info("[narrow_search_space] 探索空間を更新:\n%s", description)
+        return {
+            "messages": [
+                ToolMessage(
+                    content=f"探索空間を更新しました:\n{description}",
+                    tool_call_id=tool_call_id,
+                )
+            ],
+            "current_param_space": result,
         }
 
     def _should_continue(self, state: SupervisorState) -> Literal["continue", "end"]:
