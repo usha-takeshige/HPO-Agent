@@ -27,11 +27,14 @@
 | `SupervisorState` | Pydantic モデル | LangGraph グラフの状態を保持する | 4.2 スーパーバイザーエージェント |
 | `LLMProviderBase` | 抽象クラス | LLMインスタンスを提供するインターフェースを定義する | 5.3 拡張性 |
 | `GoogleLLMProvider` | 具象クラス | Google Gemini の LLM インスタンスを提供する | 5.1 初期対応 LLM |
+| `OpenAILLMProvider` | 具象クラス | OpenAI GPT の LLM インスタンスを提供する | 5.3 拡張性 |
+| `AnthropicLLMProvider` | 具象クラス | Anthropic Claude の LLM インスタンスを提供する | 5.3 拡張性 |
 | `ModelAdapterBase` | 抽象クラス | モデルのパラメータ空間取得・評価実行のインターフェースを定義する | 8.1 拡張性 |
 | `ParamSpecSchema` | Pydantic モデル | LLM の structured output 用パラメータ仕様スキーマ | LLM 自動生成 |
 | `ParamSpaceSchema` | Pydantic モデル | LLM の structured output 用パラメータ空間スキーマ | LLM 自動生成 |
 | `LightGBMAdapter` | 具象クラス | LightGBM に対してパラメータ空間取得・評価を実行する | 2.1 初期対応モデル |
 | `SklearnAdapter` | 具象クラス | scikit-learn 互換モデル（BaseEstimator）に対してパラメータ空間取得・評価を実行する | 2.1 対応モデル |
+| `PyTorchAdapter` | 具象クラス | PyTorch モデルファクトリ関数に対してパラメータ空間取得・評価を実行する | 2.1 対応モデル |
 | `HPOToolBase` | 抽象クラス | HPO ツール（探索アルゴリズム）のインターフェースを定義する | 4.3 ツール一覧 |
 | `BayesianOptimizationTool` | 具象クラス | Optuna によるベイズ最適化を実行する | 4.3 BayesianOptimizationTool |
 | `SobolSearchTool` | 具象クラス | Sobol 列による準ランダム探索を実行する | 4.3 SobolSearchTool |
@@ -193,7 +196,7 @@ class SupervisorState(BaseModel):
 ```python
 class LLMProviderBase(ABC):
     @abstractmethod
-    def get_llm(self) -> BaseChatModel: ...
+    def get_llm(self, temperature: float = 0) -> BaseChatModel: ...
 ```
 
 **SOLIDチェック**
@@ -213,7 +216,7 @@ class LLMProviderBase(ABC):
 ```python
 class GoogleLLMProvider(LLMProviderBase):
     def __init__(self, api_key: str, model_name: str) -> None: ...
-    def get_llm(self) -> BaseChatModel: ...
+    def get_llm(self, temperature: float = 0) -> BaseChatModel: ...
 ```
 
 **SOLIDチェック**
@@ -503,7 +506,7 @@ class HPOAgent:
     def run(self) -> HPOResult: ...
     def _build_supervisor(self, adapter: ModelAdapterBase, param_space: ParamSpace, generated_param_space: ParamSpace | None = None) -> Supervisor: ...
     def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace | None]: ...
-    def _resolve_llm_provider(self) -> GoogleLLMProvider: ...
+    def _resolve_llm_provider(self) -> LLMProviderBase: ...
     def _generate_param_space(self) -> ParamSpace: ...
     def _format_param_space(self, param_space: ParamSpace) -> list[str]: ...
 ```
@@ -617,8 +620,8 @@ Supervisor.run(config)
 | パターン名 | 適用箇所（クラス名） | 採用理由 |
 |-----------|-------------------|---------|
 | Strategy | `HPOToolBase` / `BayesianOptimizationTool` / `SobolSearchTool` / `ExpertAgentTool` | 探索アルゴリズムを実行時に切り替え可能にし、Supervisor がアルゴリズムの詳細に依存しないようにする |
-| Adapter | `ModelAdapterBase` / `LightGBMAdapter` | LightGBM・sklearn 等のモデルインターフェースの違いを吸収し、ツールがモデル種別に依存しないようにする |
-| Abstract Factory | `LLMProviderBase` / `GoogleLLMProvider` | LLM プロバイダーの切り替えをコード修正なしに実現する |
+| Adapter | `ModelAdapterBase` / `LightGBMAdapter` / `SklearnAdapter` / `PyTorchAdapter` | LightGBM・sklearn・PyTorch 等のモデルインターフェースの違いを吸収し、ツールがモデル種別に依存しないようにする |
+| Abstract Factory | `LLMProviderBase` / `GoogleLLMProvider` / `OpenAILLMProvider` / `AnthropicLLMProvider` | LLM プロバイダーの切り替えをコード修正なしに実現する |
 | Dependency Injection | `HPOAgent._build_supervisor()` | `Supervisor` に渡す依存（LLM・ツール・レポートジェネレーター）を外部から注入することでテスタビリティを高める |
 
 ### Strategy パターンの詳細
@@ -644,7 +647,7 @@ classDiagram
         +run() HPOResult
         -_build_supervisor(adapter, param_space) Supervisor
         -_resolve_adapter() tuple
-        -_resolve_llm_provider() GoogleLLMProvider
+        -_resolve_llm_provider() LLMProviderBase
     }
 
     class HPOConfig {
@@ -681,13 +684,25 @@ classDiagram
 
     class LLMProviderBase {
         <<abstract>>
-        +get_llm() BaseChatModel
+        +get_llm(temperature: float) BaseChatModel
     }
 
     class GoogleLLMProvider {
         -api_key: str
         -model_name: str
-        +get_llm() BaseChatModel
+        +get_llm(temperature: float) BaseChatModel
+    }
+
+    class OpenAILLMProvider {
+        -api_key: str
+        -model_name: str
+        +get_llm(temperature: float) BaseChatModel
+    }
+
+    class AnthropicLLMProvider {
+        -api_key: str
+        -model_name: str
+        +get_llm(temperature: float) BaseChatModel
     }
 
     class ModelAdapterBase {
@@ -701,6 +716,22 @@ classDiagram
         -eval_fn: Callable
         -X: Any
         -y: Any
+        +get_default_param_space() ParamSpace
+        +evaluate(params: dict) float
+    }
+
+    class SklearnAdapter {
+        -model: BaseEstimator
+        -eval_fn: Callable
+        -X: Any
+        -y: Any
+        +get_default_param_space() ParamSpace
+        +evaluate(params: dict) float
+    }
+
+    class PyTorchAdapter {
+        -model_fn: Callable
+        -eval_fn: Callable
         +get_default_param_space() ParamSpace
         +evaluate(params: dict) float
     }
@@ -777,7 +808,11 @@ classDiagram
     HPOAgent --> LLMProviderBase : resolves
 
     LLMProviderBase <|-- GoogleLLMProvider : implements
+    LLMProviderBase <|-- OpenAILLMProvider : implements
+    LLMProviderBase <|-- AnthropicLLMProvider : implements
     ModelAdapterBase <|-- LightGBMAdapter : implements
+    ModelAdapterBase <|-- SklearnAdapter : implements
+    ModelAdapterBase <|-- PyTorchAdapter : implements
     HPOToolBase <|-- BayesianOptimizationTool : implements
     HPOToolBase <|-- SobolSearchTool : implements
     HPOToolBase <|-- ExpertAgentTool : implements
@@ -803,6 +838,8 @@ classDiagram
 |-----------|------|----------------|
 | `langchain` / `langgraph` | エージェントグラフ構築・ツール定義 | `Supervisor`, `HPOToolBase`, `ExpertAgentTool` |
 | `langchain-google-genai` | Google Gemini LLM クライアント | `GoogleLLMProvider` |
+| `langchain-openai` | OpenAI GPT LLM クライアント | `OpenAILLMProvider` |
+| `langchain-anthropic` | Anthropic Claude LLM クライアント | `AnthropicLLMProvider` |
 | `optuna` | ベイズ最適化（TPE サンプラー） | `BayesianOptimizationTool` |
 | `scipy` | Sobol 列生成（`scipy.stats.qmc.Sobol`） | `SobolSearchTool` |
 | `lightgbm` | LightGBM モデル評価 | `LightGBMAdapter` |
