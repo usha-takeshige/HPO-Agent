@@ -116,7 +116,7 @@ class HPOAgent:
         model = self._config.model
         adapter: ModelAdapterBase
         if isinstance(model, lgb.LGBMModel):
-            adapter: ModelAdapterBase = LightGBMAdapter(
+            adapter = LightGBMAdapter(
                 model=model,
                 eval_fn=self._config.eval_fn,
                 X=self._config.X,
