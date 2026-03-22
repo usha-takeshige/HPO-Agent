@@ -8,6 +8,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from langchain_core.tools import BaseTool
+
 from hpo_agent.adapters import LightGBMAdapter, ModelAdapterBase
 from hpo_agent.models import HPOConfig, HPOResult, ParamSpace
 from hpo_agent.prompts import (
@@ -21,7 +23,7 @@ from hpo_agent.supervisor import Supervisor
 from hpo_agent.tools import (
     BayesianOptimizationTool,
     ExpertAgentTool,
-    HPOToolBase,
+    NarrowSearchSpaceTool,
     SobolSearchTool,
 )
 
@@ -136,7 +138,7 @@ class HPOAgent:
             EXPERT_AGENT_DEFAULT_PROMPT,
             self._config.prompts.get("expert_agent"),
         )
-        tools: list[HPOToolBase] = [
+        tools: list[BaseTool] = [
             SobolSearchTool(
                 adapter=adapter,
                 param_space=param_space,
@@ -158,6 +160,15 @@ class HPOAgent:
                 system_prompt=expert_system_prompt,
                 name="expert_agent",
                 description="専門家 AI エージェントによる決め打ち探索",
+            ),
+            NarrowSearchSpaceTool(
+                param_space=param_space,
+                name="narrow_search_space",
+                description=(
+                    "過去の探索結果をもとに探索空間を狭める。"
+                    "param_updates に JSON 文字列で新しい範囲を指定する。"
+                    '例: [{"name": "learning_rate", "low": 0.05, "high": 0.1}]'
+                ),
             ),
         ]
 
