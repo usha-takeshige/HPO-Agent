@@ -84,7 +84,7 @@ class TrialRecord:
         """TrialRecord を辞書に変換する。timestamp は ISO 文字列にシリアライズする。"""
         return {
             "trial_id": self.trial_id,
-            "params": self.params,
+            **self.params,
             "score": self.score,
             "tool_used": self.tool_used,
             "timestamp": self.timestamp.isoformat(),
