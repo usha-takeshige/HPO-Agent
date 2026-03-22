@@ -53,6 +53,30 @@ EXPERT_AGENT_DEFAULT_PROMPT: str = """あなたは機械学習のハイパーパ
 }"""
 
 
+PARAM_SPACE_GENERATION_PROMPT: str = """あなたはハイパーパラメーター最適化の専門家です。
+以下の情報をもとに、与えられたモデルに対する適切なハイパーパラメーター探索空間を設計してください。
+
+## モデル情報
+
+- モデルクラス名: {model_class_name}
+- 総試行回数: {n_trials}
+
+## 評価関数（参考）
+
+```python
+{eval_fn_source}
+```
+
+## 出力要件
+
+- 探索すべきハイパーパラメーターを specs リストとして出力してください
+- 各パラメーターの type は "int", "float", "categorical" のいずれかです
+- 数値型には low（下限）と high（上限）を設定してください
+- 対数スケールが適切なパラメーター（学習率など）には log=true を設定してください
+- categorical 型には choices（選択肢リスト）を設定してください
+- 試行回数（{n_trials} 回）に見合った、過不足のないパラメーター数を設計してください"""
+
+
 def build_system_prompt(default: str, user_addition: str | None) -> str:
     """デフォルトプロンプトにユーザー追加プロンプトを結合する。
 

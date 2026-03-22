@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import logging
 import os
 from collections.abc import Callable
 from typing import Any
@@ -18,6 +20,7 @@ from hpo_agent.adapters import (
 from hpo_agent.models import HPOConfig, HPOResult, ParamSpace
 from hpo_agent.prompts import (
     EXPERT_AGENT_DEFAULT_PROMPT,
+    PARAM_SPACE_GENERATION_PROMPT,
     SUPERVISOR_DEFAULT_PROMPT,
     build_system_prompt,
 )
@@ -30,6 +33,8 @@ from hpo_agent.tools import (
     NarrowSearchSpaceTool,
     SobolSearchTool,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class HPOAgent:
@@ -45,7 +50,7 @@ class HPOAgent:
     PyTorch の場合:
         model にモデルファクトリ関数 (params: dict) -> model を渡す。
         eval_fn のシグネチャは (model) -> float（学習・評価ループ全体を含む）。
-        X, y は不要。param_space の指定が必須。
+        X, y は不要。
 
     Args:
         model: チューニング対象モデルまたはモデルファクトリ関数。
@@ -58,8 +63,7 @@ class HPOAgent:
         n_trials: 総試行回数。
         X: 特徴量データ（LightGBM のみ使用）。
         y: ターゲットデータ（LightGBM のみ使用）。
-        param_space: 最適化対象パラメータ空間。PyTorch では必須。
-            LightGBM で None の場合はアダプターのデフォルトを使用。
+        param_space: 最適化対象パラメータ空間。省略時は LLM が自動生成する。
         seed: 乱数シード。None の場合は非決定的。
         prompts: エージェント別追加プロンプト辞書。キー: "supervisor", "expert_agent"。
         llm_model: LLM モデル名（.env 設定の上書き用）。
@@ -93,22 +97,29 @@ class HPOAgent:
     def run(self) -> HPOResult:
         """HPO を実行して結果を返す。
 
+        param_space が未指定の場合は LLM が自動生成する。
+
         Returns:
             最適化結果（HPOResult）。
         """
         adapter, param_space = self._resolve_adapter()
-        supervisor = self._build_supervisor(adapter, param_space)
+        generated_param_space: ParamSpace | None = None
+        if param_space is None:
+            param_space = self._generate_param_space()
+            generated_param_space = param_space
+        supervisor = self._build_supervisor(adapter, param_space, generated_param_space)
         return supervisor.run(self._config)
 
-    def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace]:
+    def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace | None]:
         """モデル型に応じたアダプターと使用するパラメータ空間を返す。
 
+        param_space が未指定の場合は None を返す。呼び出し元で LLM 自動生成を行う。
+
         Returns:
-            (adapter, param_space) のタプル。
+            (adapter, param_space) のタプル。param_space は None の場合あり。
 
         Raises:
             TypeError: 未対応のモデル型の場合。
-            ValueError: scikit-learn / PyTorch モデルで param_space が未指定の場合。
         """
         import lightgbm as lgb
         from sklearn.base import BaseEstimator  # type: ignore[import-untyped]
@@ -123,10 +134,6 @@ class HPOAgent:
                 y=self._config.y,
             )
         elif isinstance(model, BaseEstimator):
-            if self._config.param_space is None:
-                raise ValueError(
-                    "scikit-learn モデルを使用する場合は param_space の指定が必須です。"
-                )
             adapter = SklearnAdapter(
                 model=model,
                 eval_fn=self._config.eval_fn,
@@ -134,14 +141,9 @@ class HPOAgent:
                 y=self._config.y,
             )
         elif callable(model):
-            if self._config.param_space is None:
-                raise ValueError(
-                    "PyTorch モデルを使用する場合は param_space の指定が必須です。"
-                )
             adapter = PyTorchAdapter(
                 model_fn=model,
                 eval_fn=self._config.eval_fn,
-                param_space=self._config.param_space,
             )
         else:
             raise TypeError(
@@ -150,8 +152,66 @@ class HPOAgent:
                 "PyTorch (callable な model_fn)。"
             )
 
-        param_space = self._config.param_space or adapter.get_default_param_space()
-        return adapter, param_space
+        return adapter, self._config.param_space
+
+    def _generate_param_space(self) -> ParamSpace:
+        """LLM を使ってモデルに適したパラメータ空間を自動生成する。
+
+        eval_fn のソースコード・モデルクラス名・試行回数を LLM に渡し、
+        ParamSpaceSchema として構造化出力を受け取る。
+
+        Returns:
+            LLM が生成した ParamSpace。
+        """
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from hpo_agent.models import ParamSpaceSchema
+
+        llm_provider = self._resolve_llm_provider()
+        llm = llm_provider.get_llm(temperature=0)
+        structured_llm = llm.with_structured_output(ParamSpaceSchema)
+
+        model_class_name = type(self._config.model).__name__
+        try:
+            eval_fn_source = inspect.getsource(self._config.eval_fn)
+        except (OSError, TypeError):
+            eval_fn_source = "(ソース取得不可)"
+
+        prompt = PARAM_SPACE_GENERATION_PROMPT.format(
+            model_class_name=model_class_name,
+            n_trials=self._config.n_trials,
+            eval_fn_source=eval_fn_source,
+        )
+        result: ParamSpaceSchema = structured_llm.invoke(  # type: ignore[assignment]
+            [
+                SystemMessage(content="あなたは機械学習の専門家です。"),
+                HumanMessage(content=prompt),
+            ]
+        )
+        param_space = result.to_param_space()
+        logger.info(
+            "[HPOAgent] LLM が自動生成したパラメータ空間 (model=%s, n_trials=%d):\n%s",
+            model_class_name,
+            self._config.n_trials,
+            "\n".join(self._format_param_space(param_space)),
+        )
+        return param_space
+
+    def _format_param_space(self, param_space: ParamSpace) -> list[str]:
+        """ParamSpace の各 spec を人が読める形式の行リストとして返す。"""
+        lines: list[str] = []
+        for spec in param_space.specs:
+            if spec.type == "categorical":
+                lines.append(
+                    f"  - {spec.name}: categorical, choices={list(spec.choices or [])}"
+                )
+            else:
+                scale = "log" if spec.log else "linear"
+                lines.append(
+                    f"  - {spec.name}: {spec.type},"
+                    f" [{spec.low}, {spec.high}], {scale}"
+                )
+        return lines
 
     def _resolve_llm_provider(self) -> GoogleLLMProvider:
         """環境変数から LLM プロバイダーを構築して返す。"""
@@ -164,12 +224,14 @@ class HPOAgent:
         self,
         adapter: ModelAdapterBase,
         param_space: ParamSpace,
+        generated_param_space: ParamSpace | None = None,
     ) -> Supervisor:
         """Supervisor インスタンスを構築して返す。
 
         Args:
             adapter: モデルアダプター。
             param_space: 使用するパラメータ空間。
+            generated_param_space: LLM が自動生成したパラメータ空間。レポートに記載される。
 
         Returns:
             構築済みの Supervisor。
@@ -226,4 +288,5 @@ class HPOAgent:
             tools=tools,
             report_generator=ReportGenerator(),
             system_prompt=supervisor_prompt,
+            generated_param_space=generated_param_space,
         )

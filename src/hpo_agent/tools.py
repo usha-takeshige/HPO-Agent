@@ -180,6 +180,9 @@ class BayesianOptimizationTool(HPOToolBase):
             }
             if not params_clipped:
                 continue
+            # 探索空間が狭められた場合、範囲外の試行はスキップする
+            if not self._params_within_distributions(params_clipped, distributions):
+                continue
             frozen_trial = optuna.trial.FrozenTrial(
                 number=len(study.trials),
                 state=optuna.trial.TrialState.COMPLETE,
@@ -258,6 +261,38 @@ class BayesianOptimizationTool(HPOToolBase):
                     choices=spec.choices,
                 )
         return distributions
+
+    def _params_within_distributions(
+        self,
+        params: dict[str, Any],
+        distributions: dict[str, optuna.distributions.BaseDistribution],
+    ) -> bool:
+        """すべてのパラメータ値が対応する分布の範囲内かを検証する。
+
+        探索空間が狭められた後、古い試行履歴の値が新しい範囲外の場合に
+        ウォームスタートをスキップするために使用する。
+
+        Args:
+            params: 検証対象のパラメータ辞書。
+            distributions: Optuna の分布辞書。
+
+        Returns:
+            すべての値が範囲内であれば True、1つでも範囲外であれば False。
+        """
+        for name, value in params.items():
+            dist = distributions.get(name)
+            if dist is None:
+                continue
+            if isinstance(dist, optuna.distributions.FloatDistribution):
+                if not (dist.low <= float(value) <= dist.high):
+                    return False
+            elif isinstance(dist, optuna.distributions.IntDistribution):
+                if not (dist.low <= int(value) <= dist.high):
+                    return False
+            elif isinstance(dist, optuna.distributions.CategoricalDistribution):
+                if value not in dist.choices:
+                    return False
+        return True
 
 
 # ---------------------------------------------------------------------------

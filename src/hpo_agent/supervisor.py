@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 
-from hpo_agent.models import HPOConfig, HPOResult, TrialRecord
+from hpo_agent.models import HPOConfig, HPOResult, ParamSpace, TrialRecord
 from hpo_agent.report import ReportGenerator
 from hpo_agent.state import SupervisorState
 from hpo_agent.tools import HPOToolBase, NarrowSearchSpaceTool
@@ -29,6 +29,7 @@ class Supervisor:
         tools: 使用可能なツールのリスト（HPOToolBase および NarrowSearchSpaceTool）。
         report_generator: 中間・最終レポート生成器。
         system_prompt: Supervisor への初期システムプロンプト。
+        generated_param_space: LLM が自動生成したパラメータ空間。レポートに記載される。
     """
 
     def __init__(
@@ -37,12 +38,14 @@ class Supervisor:
         tools: list[BaseTool],
         report_generator: ReportGenerator,
         system_prompt: str,
+        generated_param_space: ParamSpace | None = None,
     ) -> None:
         """Supervisor を初期化する。"""
         self._llm = llm
         self._tools = tools
         self._report_generator = report_generator
         self._system_prompt = system_prompt
+        self._generated_param_space = generated_param_space
         self._tool_map: dict[str, BaseTool] = {t.name: t for t in tools}
 
     def run(self, config: HPOConfig) -> HPOResult:
@@ -263,6 +266,7 @@ class Supervisor:
             best_score=best_score,
             llm=self._llm,
             seed=config.seed,
+            generated_param_space=self._generated_param_space,
         )
 
         return HPOResult(
