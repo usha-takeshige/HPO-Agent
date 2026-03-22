@@ -267,9 +267,7 @@ class TestNarrowedSpaceConstraints:
                 ParamSpec(
                     name="learning_rate", type="float", low=0.05, high=0.2, log=True
                 ),
-                ParamSpec(
-                    name="boosting_type", type="categorical", choices=("gbdt",)
-                ),
+                ParamSpec(name="boosting_type", type="categorical", choices=("gbdt",)),
             )
         )
         tool = SobolSearchTool(

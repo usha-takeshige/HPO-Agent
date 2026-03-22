@@ -738,9 +738,7 @@ class TestNarrowSearchSpaceTool:
         result = narrow_search_space_tool._run(param_updates=updates)
         assert "Error" in result
 
-    def test_expanding_low_returns_error(
-        self, narrow_search_space_tool: Any
-    ) -> None:
+    def test_expanding_low_returns_error(self, narrow_search_space_tool: Any) -> None:
         """CMP-37: 数値型の low を元より小さく指定 → "Error" を含む文字列."""
         import json
 
@@ -775,9 +773,7 @@ class TestNarrowSearchSpaceTool:
         assert nl_spec.low == 30.0
         assert nl_spec.high == 80.0
 
-    def test_unmodified_params_preserved(
-        self, narrow_search_space_tool: Any
-    ) -> None:
+    def test_unmodified_params_preserved(self, narrow_search_space_tool: Any) -> None:
         """CMP-40: 更新対象でないパラメータは元の値を引き継ぐ."""
         import json
 
@@ -803,9 +799,7 @@ class TestNarrowSearchSpaceTool:
                 ParamSpec(
                     name="learning_rate", type="float", low=0.05, high=0.1, log=True
                 ),
-                ParamSpec(
-                    name="boosting_type", type="categorical", choices=("gbdt",)
-                ),
+                ParamSpec(name="boosting_type", type="categorical", choices=("gbdt",)),
             )
         )
         tool = SobolSearchTool(

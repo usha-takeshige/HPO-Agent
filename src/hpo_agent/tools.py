@@ -82,12 +82,8 @@ class SobolSearchTool(HPOToolBase):
     ) -> list[TrialRecord]:
         """Sobol 列でパラメータをサンプリングして評価する。"""
         param_space = effective_param_space or self.param_space
-        numerical_specs = [
-            s for s in param_space.specs if s.type in ("int", "float")
-        ]
-        categorical_specs = [
-            s for s in param_space.specs if s.type == "categorical"
-        ]
+        numerical_specs = [s for s in param_space.specs if s.type in ("int", "float")]
+        categorical_specs = [s for s in param_space.specs if s.type == "categorical"]
 
         # --- Sobol サンプリング（数値パラメータ）---
         algo_start = time.perf_counter()
@@ -515,9 +511,7 @@ class NarrowSearchSpaceTool(BaseTool):
                 new_choices = tuple(raw_choices)
                 invalid = set(new_choices) - set(original.choices)
                 if invalid:
-                    return (
-                        f"Error: '{name}' の choices に元にない値が含まれます: {invalid}"
-                    )
+                    return f"Error: '{name}' の choices に元にない値が含まれます: {invalid}"
                 updated_specs[name] = ParamSpec(
                     name=name,
                     type="categorical",
