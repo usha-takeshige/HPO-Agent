@@ -33,7 +33,7 @@ class ParamSpec:
     type: Literal["int", "float", "categorical"]
     low: float | None = None
     high: float | None = None
-    choices: tuple[Any, ...] | None = None
+    choices: tuple[str | int | float, ...] | None = None
     log: bool = False
 
     def __post_init__(self) -> None:
@@ -70,7 +70,7 @@ class ParamSpecSchema(BaseModel):
     )
     low: float | None = Field(default=None, description="数値型の下限")
     high: float | None = Field(default=None, description="数値型の上限")
-    choices: list[Any] | None = Field(
+    choices: list[str | int | float] | None = Field(
         default=None, description="カテゴリカル型の選択肢リスト"
     )
     log: bool = Field(default=False, description="対数スケールフラグ")
