@@ -50,3 +50,31 @@ class GoogleLLMProvider(LLMProviderBase):
             google_api_key=self._api_key,
             temperature=temperature,
         )
+
+
+class OpenAILLMProvider(LLMProviderBase):
+    """OpenAI GPT の LLM インスタンスを提供するプロバイダー。
+
+    Args:
+        api_key: OpenAI API キー。
+        model_name: 使用するモデル名（例: "gpt-4o"）。
+    """
+
+    def __init__(self, api_key: str, model_name: str) -> None:
+        """OpenAILLMProvider を初期化する。"""
+        self._api_key = api_key
+        self._model_name = model_name
+
+    def get_llm(self, temperature: float = 0) -> BaseChatModel:
+        """OpenAI GPT の LLM インスタンスを返す。
+
+        Args:
+            temperature: サンプリング温度。0 は確定的、高いほど多様な出力。
+        """
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=self._model_name,
+            api_key=self._api_key,  # type: ignore[arg-type]
+            temperature=temperature,
+        )
