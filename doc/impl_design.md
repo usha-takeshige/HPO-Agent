@@ -53,6 +53,8 @@ class HPOConfig:
     model: Any                           # チューニング対象モデル
     eval_fn: Callable[..., float]        # ユーザー定義評価関数
     n_trials: int                        # 総試行回数
+    X: Any                               # 特徴量データ
+    y: Any                               # ターゲットデータ
     param_space: ParamSpace | None = None  # 最適化対象パラメーター（None のとき adapter のデフォルト使用）
     seed: int | None = None              # 乱数シード（None のとき非決定的）
     prompts: dict[str, str] = field(default_factory=dict)  # エージェント別追加プロンプト
@@ -224,7 +226,7 @@ class GoogleLLMProvider(LLMProviderBase):
 ```python
 class ModelAdapterBase(ABC):
     @abstractmethod
-    def get_param_space(self) -> ParamSpace: ...
+    def get_default_param_space(self) -> ParamSpace: ...
 
     @abstractmethod
     def evaluate(self, params: dict[str, Any]) -> float: ...
@@ -250,9 +252,11 @@ class LightGBMAdapter(ModelAdapterBase):
         self,
         model: lgb.LGBMModel,
         eval_fn: Callable[..., float],
+        X: Any,
+        y: Any,
     ) -> None: ...
 
-    def get_param_space(self) -> ParamSpace: ...
+    def get_default_param_space(self) -> ParamSpace: ...
     def evaluate(self, params: dict[str, Any]) -> float: ...
 ```
 
@@ -360,6 +364,10 @@ class ReportGenerator:
         trial_records: list[TrialRecord],
         best_params: dict[str, Any],
         best_score: float,
+        seed: int | None = None,
+        tool_reasoning: str = "",
+        current_tool_records: list[TrialRecord] | None = None,
+        title: str = "# HPO 中間レポート",
     ) -> str:
         """ツール実行完了ごとに出力する中間レポートを生成する。LLM は使用しない。"""
         ...
@@ -370,6 +378,7 @@ class ReportGenerator:
         best_params: dict[str, Any],
         best_score: float,
         llm: BaseChatModel,
+        seed: int | None = None,
     ) -> str:
         """最適化完了後の最終レポートを生成する。LLM による AI 考察を含む。"""
         ...
@@ -426,14 +435,18 @@ class HPOAgent:
         model: Any,
         eval_fn: Callable[..., float],
         n_trials: int,
+        X: Any,
+        y: Any,
+        param_space: ParamSpace | None = None,
+        seed: int | None = None,
         prompts: dict[str, str] | None = None,
         llm_model: str | None = None,
     ) -> None: ...
 
     def run(self) -> HPOResult: ...
-    def _build_supervisor(self) -> Supervisor: ...
-    def _resolve_adapter(self) -> ModelAdapterBase: ...
-    def _resolve_llm_provider(self) -> LLMProviderBase: ...
+    def _build_supervisor(self, adapter: ModelAdapterBase, param_space: ParamSpace) -> Supervisor: ...
+    def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace]: ...
+    def _resolve_llm_provider(self) -> GoogleLLMProvider: ...
 ```
 
 **SOLIDチェック**
@@ -570,16 +583,19 @@ classDiagram
     class HPOAgent {
         -config: HPOConfig
         +run() HPOResult
-        -_build_supervisor() Supervisor
-        -_resolve_adapter() ModelAdapterBase
-        -_resolve_llm_provider() LLMProviderBase
+        -_build_supervisor(adapter, param_space) Supervisor
+        -_resolve_adapter() tuple
+        -_resolve_llm_provider() GoogleLLMProvider
     }
 
     class HPOConfig {
         +model: Any
         +eval_fn: Callable
         +n_trials: int
+        +X: Any
+        +y: Any
         +param_space: ParamSpace
+        +seed: int
         +prompts: dict
         +llm_model: str
     }
@@ -616,14 +632,16 @@ classDiagram
 
     class ModelAdapterBase {
         <<abstract>>
-        +get_param_space() ParamSpace
+        +get_default_param_space() ParamSpace
         +evaluate(params: dict) float
     }
 
     class LightGBMAdapter {
         -model: LGBMModel
         -eval_fn: Callable
-        +get_param_space() ParamSpace
+        -X: Any
+        -y: Any
+        +get_default_param_space() ParamSpace
         +evaluate(params: dict) float
     }
 
@@ -651,8 +669,8 @@ classDiagram
     }
 
     class ReportGenerator {
-        +generate_intermediate(records: list, best_params: dict, best_score: float) str
-        +generate_final(records: list, best_params: dict, best_score: float, llm: BaseChatModel) str
+        +generate_intermediate(records: list, best_params: dict, best_score: float, seed, tool_reasoning, current_tool_records, title) str
+        +generate_final(records: list, best_params: dict, best_score: float, llm: BaseChatModel, seed) str
     }
 
     class TrialRecord {
@@ -737,7 +755,7 @@ classDiagram
 | プロンプト結合ルール | デフォルトシステムプロンプト + ユーザープロンプトを文字列連結で渡す。結合順序は必ずデフォストが先 | `Supervisor.__init__()`, `ExpertAgentTool.__init__()` |
 | LightGBM パラメータ空間 | MVP では `num_leaves`, `max_depth`, `learning_rate`, `n_estimators`, `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda` をデフォルト空間として定義する | `LightGBMAdapter.get_param_space()` |
 | 同期実行の保証 | `HPOAgent.run()` は同期ブロッキングとする。LangGraph の非同期 API は使用しない（将来拡張への考慮のみ） | `HPOAgent.run()` |
-| ログ出力 | 各試行の実行後に試行番号・スコア・評価時間・アルゴリズム計算時間を `logging.DEBUG` で出力する。ツール完了時にはツール名・合計実行時間を `logging.INFO` で出力する | `HPOToolBase._run()` |
+| ログ出力 | 各試行の実行後に試行番号・スコア・評価時間・パラメータを `logging.INFO` で出力する。ツール完了時にはツール名・試行数・最良スコア・中間レポートを `logging.INFO` で出力する | `HPOToolBase._run()`, `Supervisor._tool_executor_node()` |
 | 中間レポートの出力タイミング | ツール実行が完了し `SupervisorState` が更新されたタイミングで `_report_progress()` を呼び出す。LLM を使用しないため低コスト | `Supervisor._report_progress()` |
 | 中間レポートと最終レポートの違い | 中間レポートは現時点の統計サマリーのみ（LLM なし）。最終レポートのみ AI による考察・推薦コメントを含む（LLM あり） | `ReportGenerator.generate_intermediate()` / `generate_final()` |
 | モデルのディープコピー | 複数試行で同一モデルオブジェクトを汚染しないよう、評価前に `copy.deepcopy(model)` を行う | `ModelAdapterBase.evaluate()` |

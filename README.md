@@ -52,27 +52,35 @@ LLM_PROVIDER=google
 
 ```python
 import lightgbm as lgb
-from sklearn.model_selection import cross_val_score
+from sklearn.datasets import load_breast_cancer
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 from hpo_agent import HPOAgent
 
-# 1. チューニング対象のモデルを用意
-model = lgb.LGBMClassifier()
+# 1. データを用意
+X, y = load_breast_cancer(return_X_y=True, as_frame=True)
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# 2. 評価関数を定義（スコアを返す。大きいほど良い）
+# 2. チューニング対象のモデルを用意
+model = lgb.LGBMClassifier(verbosity=-1)
+
+# 3. 評価関数を定義（スコアを返す。大きいほど良い）
+#    eval_fn には学習済みモデルと X, y が渡される
 def my_eval(model, X, y) -> float:
-    scores = cross_val_score(model, X, y, cv=5, scoring="roc_auc")
-    return scores.mean()
+    return float(accuracy_score(y, model.predict(X)))
 
-# 3. HPOAgent を作成して実行
+# 4. HPOAgent を作成して実行
 agent = HPOAgent(
     model=model,
     eval_fn=my_eval,
     n_trials=50,
+    X=X_train,
+    y=y_train,
 )
 
 result = agent.run()
 
-# 4. 結果を確認
+# 5. 結果を確認
 print(result.best_params)   # 最良パラメーター辞書
 print(result.best_score)    # 最良スコア
 print(result.trials_df)     # 全試行の履歴（pandas DataFrame）
@@ -80,13 +88,16 @@ print(result.report)        # Markdown 形式のレポート
 ```
 
 > **注意**
-> `eval_fn` は「大きいほど良い」スコアを返す設計です。
-> RMSE や Log Loss など損失関数を使う場合は、呼び出し側で符号を反転してください。
+> `eval_fn` には、指定したパラメーターで学習済みのモデルと、`HPOAgent` に渡した `X`・`y` が渡されます。
+> 「大きいほど良い」スコアを返す設計のため、RMSE や Log Loss など損失関数を使う場合は符号を反転してください。
 > ```python
 > def my_eval(model, X, y) -> float:
+>     from sklearn.metrics import mean_squared_error
 >     rmse = mean_squared_error(y, model.predict(X), squared=False)
 >     return -rmse  # 符号反転して「大きいほど良い」に変換
 > ```
+>
+> クロスバリデーションを使いたい場合は、`eval_fn` 内で `copy.deepcopy(model)` して再学習することも可能です（[s5e4_lgbm.py](example/s5e4_lgbm.py) を参照）。
 
 ---
 
@@ -97,6 +108,8 @@ agent = HPOAgent(
     model=model,           # 必須
     eval_fn=my_eval,       # 必須
     n_trials=50,           # 必須
+    X=X_train,             # 必須
+    y=y_train,             # 必須
     param_space=None,      # 任意
     seed=42,               # 任意
     prompts={},            # 任意
@@ -109,6 +122,8 @@ agent = HPOAgent(
 | `model` | `Any` | Yes | チューニング対象のモデルオブジェクト（MVP では LightGBM） |
 | `eval_fn` | `Callable` | Yes | ユーザー定義の評価関数。`(model, X, y) -> float` のシグネチャで、大きいほど良いスコアを返す |
 | `n_trials` | `int` | Yes | HPO の総試行回数 |
+| `X` | `Any` | Yes | モデルの学習・評価に使う特徴量データ |
+| `y` | `Any` | Yes | モデルの学習・評価に使うターゲットデータ |
 | `param_space` | `ParamSpace` | No | 探索するパラメーター空間を手動指定。省略時はモデルのデフォルト空間を使用 |
 | `seed` | `int \| None` | No | 乱数シード。指定すると Sobol 探索・ベイズ最適化の結果が再現可能になる（デフォルト: `None`） |
 | `prompts` | `dict[str, str]` | No | エージェント別の追加プロンプト（詳細は[プロンプトのカスタマイズ](#プロンプトのカスタマイズ)を参照） |
