@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 import pandas as pd
+from pydantic import BaseModel, Field
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,51 @@ class ParamSpace:
     """
 
     specs: tuple[ParamSpec, ...]
+
+
+class ParamSpecSchema(BaseModel):
+    """LLM の structured output 用：1つのハイパーパラメータ仕様スキーマ。
+
+    ParamSpec の Pydantic 版。choices は tuple ではなく list で受け取り、
+    to_param_spec() で frozen dataclass の ParamSpec に変換する。
+    """
+
+    name: str = Field(description="パラメータ名")
+    type: Literal["int", "float", "categorical"] = Field(
+        description='パラメータの型。"int" / "float" / "categorical" のいずれか'
+    )
+    low: float | None = Field(default=None, description="数値型の下限")
+    high: float | None = Field(default=None, description="数値型の上限")
+    choices: list[Any] | None = Field(
+        default=None, description="カテゴリカル型の選択肢リスト"
+    )
+    log: bool = Field(default=False, description="対数スケールフラグ")
+
+    def to_param_spec(self) -> ParamSpec:
+        """ParamSpec frozen dataclass に変換する。"""
+        return ParamSpec(
+            name=self.name,
+            type=self.type,
+            low=self.low,
+            high=self.high,
+            choices=tuple(self.choices) if self.choices is not None else None,
+            log=self.log,
+        )
+
+
+class ParamSpaceSchema(BaseModel):
+    """LLM の structured output 用：パラメータ空間スキーマ。
+
+    ParamSpace の Pydantic 版。to_param_space() で frozen dataclass に変換する。
+    """
+
+    specs: list[ParamSpecSchema] = Field(
+        description="ハイパーパラメータ仕様のリスト"
+    )
+
+    def to_param_space(self) -> ParamSpace:
+        """ParamSpace frozen dataclass に変換する。"""
+        return ParamSpace(specs=tuple(s.to_param_spec() for s in self.specs))
 
 
 @dataclass
