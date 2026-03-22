@@ -516,6 +516,107 @@ class TestHistoryPassthrough:
         assert len(call_histories[0]) >= 3  # Sobol の 3 試行分
 
 
+class TestAutoParamSpaceGeneration:
+    def test_generate_param_space_called_when_none(
+        self, lgbm_binary_setup: Any, mock_param_space_llm: MagicMock
+    ) -> None:
+        """AGT-17: param_space=None の場合に _generate_param_space() が呼ばれる."""
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+
+        with (
+            patch.object(agent, "_generate_param_space", wraps=None) as mock_gen,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            from hpo_agent.models import HPOResult
+
+            mock_gen.return_value = mock_param_space_llm.with_structured_output(
+                None
+            ).invoke(None).to_param_space()
+
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={}, best_score=0.0, trials_df=__import__("pandas").DataFrame(), report=""
+            )
+            mock_build.return_value = mock_supervisor
+
+            agent.run()
+            mock_gen.assert_called_once()
+
+    def test_generate_param_space_not_called_when_provided(
+        self, lgbm_binary_setup: Any, simple_param_space: Any
+    ) -> None:
+        """AGT-18: param_space が明示的に指定された場合は _generate_param_space() が呼ばれない."""
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import HPOResult
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(
+            model=model,
+            eval_fn=eval_fn,
+            n_trials=5,
+            X=X,
+            y=y,
+            param_space=simple_param_space,
+        )
+
+        with (
+            patch.object(agent, "_generate_param_space") as mock_gen,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={}, best_score=0.0, trials_df=__import__("pandas").DataFrame(), report=""
+            )
+            mock_build.return_value = mock_supervisor
+
+            agent.run()
+            mock_gen.assert_not_called()
+
+    def test_generated_param_space_logged(
+        self,
+        lgbm_binary_setup: Any,
+        mock_param_space_llm: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """AGT-19: LLM 自動生成した param_space が INFO ログに出力される."""
+        import logging
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import HPOResult
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+
+        with (
+            patch.object(agent, "_resolve_llm_provider") as mock_provider,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            mock_provider.return_value = MagicMock()
+            mock_provider.return_value.get_llm.return_value = mock_param_space_llm
+
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={}, best_score=0.0, trials_df=__import__("pandas").DataFrame(), report=""
+            )
+            mock_build.return_value = mock_supervisor
+
+            with caplog.at_level(logging.INFO):
+                agent.run()
+
+        assert any(
+            "自動生成" in record.message or "param_space" in record.message.lower()
+            for record in caplog.records
+        )
+
+
 class TestExpertHistorySelection:
     def test_history_selection_limit(
         self, dummy_adapter: Any, simple_param_space: Any, mock_expert_llm: MagicMock

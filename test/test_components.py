@@ -113,25 +113,14 @@ class TestLightGBMAdapter:
         adapter.evaluate({"num_leaves": 64, "n_estimators": 10})
         assert model.get_params() == params_before
 
-    def test_get_default_param_space_has_eight_params(self, lgbm_binary_setup) -> None:  # type: ignore[no-untyped-def]
-        """get_default_param_space() が 8 パラメータを返す."""
+    def test_get_default_param_space_raises(self, lgbm_binary_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-24b: get_default_param_space() は NotImplementedError を送出する（LLM が自動生成）。"""
         from hpo_agent.adapters import LightGBMAdapter
 
         model, eval_fn, X, y = lgbm_binary_setup
         adapter = LightGBMAdapter(model=model, eval_fn=eval_fn, X=X, y=y)
-        space = adapter.get_default_param_space()
-        names = {s.name for s in space.specs}
-        expected = {
-            "num_leaves",
-            "max_depth",
-            "learning_rate",
-            "n_estimators",
-            "subsample",
-            "colsample_bytree",
-            "reg_alpha",
-            "reg_lambda",
-        }
-        assert names == expected
+        with pytest.raises(NotImplementedError):
+            adapter.get_default_param_space()
 
 
 # ---------------------------------------------------------------------------
@@ -625,43 +614,37 @@ class TestSklearnAdapter:
         with pytest.raises(NotImplementedError):
             adapter.get_default_param_space()
 
-    def test_resolve_adapter_without_param_space_raises(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-29: sklearn モデルで param_space を省略すると ValueError。"""
+    def test_resolve_adapter_without_param_space_returns_none(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-29: sklearn モデルで param_space を省略すると (adapter, None) が返る（ValueError なし）。"""
+        from hpo_agent.adapters import SklearnAdapter
         from hpo_agent.agent import HPOAgent
 
         model, eval_fn, X, y = sklearn_binary_setup
         agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
-        with pytest.raises(ValueError, match="param_space"):
-            agent._resolve_adapter()
+        adapter, param_space = agent._resolve_adapter()
+        assert isinstance(adapter, SklearnAdapter)
+        assert param_space is None
 
     def test_pytorch_model_fn_resolves_to_pytorch_adapter(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-30: callable な model_fn が PyTorchAdapter に解決される。"""
+        """CMP-30: callable な model_fn が PyTorchAdapter に解決される（param_space 不要）。"""
         from hpo_agent.adapters import PyTorchAdapter
         from hpo_agent.agent import HPOAgent
 
-        model_fn, eval_fn, param_space = pytorch_setup
-        agent = HPOAgent(
-            model=model_fn,
-            eval_fn=eval_fn,
-            n_trials=5,
-            param_space=param_space,
-        )
+        model_fn, eval_fn, _ = pytorch_setup
+        agent = HPOAgent(model=model_fn, eval_fn=eval_fn, n_trials=5)
         adapter, _ = agent._resolve_adapter()
         assert isinstance(adapter, PyTorchAdapter)
 
-    def test_pytorch_without_param_space_raises_value_error(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-31: PyTorch 使用時に param_space=None で ValueError。"""
+    def test_pytorch_without_param_space_returns_none(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-31: PyTorch 使用時に param_space=None で (adapter, None) が返る（ValueError なし）。"""
+        from hpo_agent.adapters import PyTorchAdapter
         from hpo_agent.agent import HPOAgent
 
         model_fn, eval_fn, _ = pytorch_setup
-        agent = HPOAgent(
-            model=model_fn,
-            eval_fn=eval_fn,
-            n_trials=5,
-            param_space=None,
-        )
-        with pytest.raises(ValueError):
-            agent._resolve_adapter()
+        agent = HPOAgent(model=model_fn, eval_fn=eval_fn, n_trials=5, param_space=None)
+        adapter, param_space = agent._resolve_adapter()
+        assert isinstance(adapter, PyTorchAdapter)
+        assert param_space is None
 
 
 # ---------------------------------------------------------------------------
@@ -674,10 +657,8 @@ class TestPyTorchAdapter:
         """CMP-32: evaluate() が float を返す。"""
         from hpo_agent.adapters import PyTorchAdapter
 
-        model_fn, eval_fn, param_space = pytorch_setup
-        adapter = PyTorchAdapter(
-            model_fn=model_fn, eval_fn=eval_fn, param_space=param_space
-        )
+        model_fn, eval_fn, _ = pytorch_setup
+        adapter = PyTorchAdapter(model_fn=model_fn, eval_fn=eval_fn)
         result = adapter.evaluate({"hidden_size": 8})
         assert isinstance(result, float)
 
@@ -687,27 +668,60 @@ class TestPyTorchAdapter:
 
         from hpo_agent.adapters import PyTorchAdapter
 
-        model_fn, eval_fn, param_space = pytorch_setup
+        model_fn, eval_fn, _ = pytorch_setup
         params = {"hidden_size": 16}
-        adapter = PyTorchAdapter(
-            model_fn=model_fn, eval_fn=eval_fn, param_space=param_space
-        )
-        # evaluate が正常終了し、モデルが nn.Module であることを確認
+        adapter = PyTorchAdapter(model_fn=model_fn, eval_fn=eval_fn)
         result = adapter.evaluate(params)
         assert isinstance(result, float)
-        # model_fn が正しく hidden_size=16 のモデルを生成することを確認
         model = model_fn(params)
         assert isinstance(model, nn.Module)
 
-    def test_get_default_param_space_returns_provided_space(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-34: get_default_param_space() がコンストラクタに渡した param_space を返す。"""
+    def test_get_default_param_space_raises(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
+        """CMP-34: get_default_param_space() は NotImplementedError を送出する（LLM が自動生成）。"""
         from hpo_agent.adapters import PyTorchAdapter
 
-        model_fn, eval_fn, param_space = pytorch_setup
-        adapter = PyTorchAdapter(
-            model_fn=model_fn, eval_fn=eval_fn, param_space=param_space
+        model_fn, eval_fn, _ = pytorch_setup
+        adapter = PyTorchAdapter(model_fn=model_fn, eval_fn=eval_fn)
+        with pytest.raises(NotImplementedError):
+            adapter.get_default_param_space()
+
+
+# ---------------------------------------------------------------------------
+# CMP-44/45: ParamSpecSchema / ParamSpaceSchema
+# ---------------------------------------------------------------------------
+
+
+class TestParamSpaceSchema:
+    def test_to_param_space_returns_frozen_dataclass(self) -> None:
+        """CMP-44: ParamSpaceSchema.to_param_space() が frozen ParamSpace を返す。"""
+        from dataclasses import FrozenInstanceError
+
+        from hpo_agent.models import ParamSpaceSchema
+
+        schema = ParamSpaceSchema.model_validate(
+            {
+                "specs": [
+                    {"name": "lr", "type": "float", "low": 0.001, "high": 0.3},
+                    {"name": "depth", "type": "int", "low": 2, "high": 10},
+                ]
+            }
         )
-        assert adapter.get_default_param_space() is param_space
+        space = schema.to_param_space()
+        assert isinstance(space, ParamSpace)
+        assert len(space.specs) == 2
+        with pytest.raises(FrozenInstanceError):
+            space.specs = ()  # type: ignore[misc]
+
+    def test_categorical_choices_list_to_tuple(self) -> None:
+        """CMP-45: ParamSpecSchema の choices=list が to_param_spec() で tuple に変換される。"""
+        from hpo_agent.models import ParamSpecSchema
+
+        schema = ParamSpecSchema.model_validate(
+            {"name": "bt", "type": "categorical", "choices": ["gbdt", "dart"]}
+        )
+        spec = schema.to_param_spec()
+        assert isinstance(spec.choices, tuple)
+        assert spec.choices == ("gbdt", "dart")
 
 
 # ---------------------------------------------------------------------------

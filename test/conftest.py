@@ -208,6 +208,7 @@ def pytorch_setup() -> tuple[Any, Any, ParamSpace]:
 
     SimpleNet は Linear 層1つの最小構成。
     eval_fn は学習なしの forward pass でスコアを返す（テストの高速化のため）。
+    param_space は HPOAgent に渡す用途で返すが、PyTorchAdapter のコンストラクタには渡さない。
     """
     import torch
     import torch.nn as nn
@@ -239,3 +240,37 @@ def pytorch_setup() -> tuple[Any, Any, ParamSpace]:
         specs=(ParamSpec(name="hidden_size", type="int", low=4, high=32),)
     )
     return model_fn, eval_fn, param_space
+
+
+@pytest.fixture
+def mock_param_space_llm(simple_param_space: ParamSpace) -> MagicMock:
+    """_generate_param_space() 用の LLM モック。
+
+    with_structured_output() が ParamSpaceSchema を返す。
+    """
+    from hpo_agent.models import ParamSpaceSchema
+
+    schema = ParamSpaceSchema.model_validate(
+        {
+            "specs": [
+                {"name": spec.name, "type": spec.type, "low": spec.low, "high": spec.high}
+                for spec in simple_param_space.specs
+                if spec.type != "categorical"
+            ]
+            + [
+                {
+                    "name": spec.name,
+                    "type": spec.type,
+                    "choices": list(spec.choices or []),
+                }
+                for spec in simple_param_space.specs
+                if spec.type == "categorical"
+            ]
+        }
+    )
+    structured = MagicMock()
+    structured.invoke.return_value = schema
+
+    llm = MagicMock()
+    llm.with_structured_output.return_value = structured
+    return llm
