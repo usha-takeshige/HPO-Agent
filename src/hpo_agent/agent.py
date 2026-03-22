@@ -8,7 +8,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from hpo_agent.adapters import LightGBMAdapter, ModelAdapterBase
+from hpo_agent.adapters import LightGBMAdapter, ModelAdapterBase, SklearnAdapter
 from hpo_agent.models import HPOConfig, HPOResult, ParamSpace
 from hpo_agent.prompts import (
     EXPERT_AGENT_DEFAULT_PROMPT,
@@ -33,7 +33,7 @@ class HPOAgent:
     Supervisor を構築して実行する。
 
     Args:
-        model: チューニング対象モデル。現在 LightGBM のみサポート。
+        model: チューニング対象モデル。LightGBM および scikit-learn (BaseEstimator) をサポート。
         eval_fn: 評価関数。シグネチャ: (model, X, y) -> float。大きいほど良いスコア。
         n_trials: 総試行回数。
         X: 特徴量データ。
@@ -87,12 +87,26 @@ class HPOAgent:
 
         Raises:
             TypeError: 未対応のモデル型の場合。
+            ValueError: scikit-learn モデルで param_space が未指定の場合。
         """
         import lightgbm as lgb
+        from sklearn.base import BaseEstimator  # type: ignore[import-untyped]
 
         model = self._config.model
+        adapter: ModelAdapterBase
         if isinstance(model, lgb.LGBMModel):
             adapter = LightGBMAdapter(
+                model=model,
+                eval_fn=self._config.eval_fn,
+                X=self._config.X,
+                y=self._config.y,
+            )
+        elif isinstance(model, BaseEstimator):
+            if self._config.param_space is None:
+                raise ValueError(
+                    "scikit-learn モデルを使用する場合は param_space の指定が必須です。"
+                )
+            adapter = SklearnAdapter(
                 model=model,
                 eval_fn=self._config.eval_fn,
                 X=self._config.X,
@@ -101,7 +115,7 @@ class HPOAgent:
         else:
             raise TypeError(
                 f"Unsupported model type: {type(model)}. "
-                "Currently only LightGBM models are supported."
+                "Supported: LightGBM models, scikit-learn BaseEstimator subclasses."
             )
 
         param_space = self._config.param_space or adapter.get_default_param_space()
