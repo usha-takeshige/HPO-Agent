@@ -105,13 +105,11 @@ def _build_system_prompt(default: str, user_addition: str | None) -> str:
 - 履歴のパターンから定性的な洞察を加えた探索が可能
 - 探索が行き詰まった際や、特定の領域を人間的な判断で深掘りしたい場合に有効
 
-## ツール選択の基本戦略
-
-以下はあくまで参考であり、状況に応じて柔軟に判断してよい。
-
-1. **初期フェーズ**（試行実績 0〜10件）: `sobol_search` でパラメータ空間を広くカバーする
-2. **中盤フェーズ**（試行実績 10件〜）: `bayesian_optimization` で有望領域を絞り込む
-3. **終盤フェーズ**（残り試行数が少ない）: `expert_agent` で専門的な視点から微調整する
+### narrow_search_space（探索空間の絞り込み）
+- 過去の探索結果から有望な範囲が特定できたときに呼び出す
+- 指定したパラメータの範囲を元の空間の部分集合に縮小する
+- 以降のすべての探索ツールが縮小された空間を使用する
+- 範囲を狭めすぎると探索が局所的になりすぎるため慎重に使用する
 
 ## ツールを呼び出す際の注意事項
 
@@ -140,7 +138,7 @@ def _build_system_prompt(default: str, user_addition: str | None) -> str:
 |-----------|------|
 | 役割定義 | LLM にエージェントとしての立場を明示する |
 | ツール一覧と特性 | 各ツールをいつ使うべきかを LLM が判断できるようにする |
-| 基本戦略 | デフォルトの探索フェーズ遷移を示しつつ、柔軟性を残す |
+| narrow_search_space | 探索空間の動的絞り込みツールの用途・注意点を明示する |
 | 呼び出し時の注意 | 試行数超過・同一ツールの連続使用等のアンチパターンを防ぐ |
 | ツール呼び出し前の出力 | ツール選択理由を必ずテキストで出力させ、レポートに記録する |
 
@@ -334,16 +332,26 @@ def _run(self, n_trials: int, trial_history: list[TrialRecord]) -> list[TrialRec
 [
   {
     "trial_id": 1,
-    "params": {"num_leaves": 64, "learning_rate": 0.05, "n_estimators": 200},
+    "num_leaves": 64,
+    "learning_rate": 0.05,
+    "n_estimators": 200,
     "score": 0.8712,
     "tool_used": "sobol_search",
+    "timestamp": "2026-03-01T00:00:00",
+    "eval_duration": 0.12,
+    "algo_duration": 0.01,
     "reasoning": ""
   },
   {
     "trial_id": 5,
-    "params": {"num_leaves": 128, "learning_rate": 0.01, "n_estimators": 500},
+    "num_leaves": 128,
+    "learning_rate": 0.01,
+    "n_estimators": 500,
     "score": 0.8934,
     "tool_used": "bayesian_optimization",
+    "timestamp": "2026-03-01T00:01:00",
+    "eval_duration": 0.15,
+    "algo_duration": 0.03,
     "reasoning": ""
   }
 ]
@@ -352,9 +360,12 @@ def _run(self, n_trials: int, trial_history: list[TrialRecord]) -> list[TrialRec
 | フィールド | 型 | 説明 |
 |----------|-----|------|
 | `trial_id` | int | 試行番号（全体で連番） |
-| `params` | dict | 試行したパラメータ（`ParamSpec.name` をキーとする） |
+| `{param_name}` | any | 試行したパラメータ（`ParamSpec.name` をキーとしてフラット展開） |
 | `score` | float | `eval_fn` が返したスコア（大きいほど良い） |
 | `tool_used` | str | 使用したツール名 |
+| `timestamp` | str | 試行開始時刻（ISO 8601 形式） |
+| `eval_duration` | float | `eval_fn` の実行時間（秒） |
+| `algo_duration` | float | アルゴリズム（パラメータ提案）の実行時間（秒） |
 | `reasoning` | str | ExpertAgentTool が提案した場合はその根拠（他ツールでは空文字列） |
 
 ---
