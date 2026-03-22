@@ -29,6 +29,7 @@
 | `GoogleLLMProvider` | 具象クラス | Google Gemini の LLM インスタンスを提供する | 5.1 初期対応 LLM |
 | `ModelAdapterBase` | 抽象クラス | モデルのパラメータ空間取得・評価実行のインターフェースを定義する | 8.1 拡張性 |
 | `LightGBMAdapter` | 具象クラス | LightGBM に対してパラメータ空間取得・評価を実行する | 2.1 初期対応モデル |
+| `SklearnAdapter` | 具象クラス | scikit-learn 互換モデル（BaseEstimator）に対してパラメータ空間取得・評価を実行する | 2.1 対応モデル |
 | `HPOToolBase` | 抽象クラス | HPO ツール（探索アルゴリズム）のインターフェースを定義する | 4.3 ツール一覧 |
 | `BayesianOptimizationTool` | 具象クラス | Optuna によるベイズ最適化を実行する | 4.3 BayesianOptimizationTool |
 | `SobolSearchTool` | 具象クラス | Sobol 列による準ランダム探索を実行する | 4.3 SobolSearchTool |
@@ -262,6 +263,35 @@ class LightGBMAdapter(ModelAdapterBase):
 
 **SOLIDチェック**
 - S: LightGBM 固有のパラメータ空間定義・評価のみが責務
+- L: `ModelAdapterBase` の契約（戻り値の型）を守る
+
+---
+
+#### `SklearnAdapter`
+
+**種別**：具象クラス
+**責務**：scikit-learn 互換モデル（BaseEstimator）に対してパラメータ空間取得・評価を実行する
+**対応する要件の概念**：2.1 対応モデル
+
+```python
+class SklearnAdapter(ModelAdapterBase):
+    def __init__(
+        self,
+        model: BaseEstimator,
+        eval_fn: Callable[..., float],
+        X: Any,
+        y: Any,
+    ) -> None: ...
+
+    def get_default_param_space(self) -> ParamSpace: ...  # NotImplementedError を送出
+    def evaluate(self, params: dict[str, Any]) -> float: ...
+```
+
+- `get_default_param_space()` は `NotImplementedError` を送出する。sklearn はモデルが多様なためデフォルト空間を持たない。使用時は `HPOAgent` に `param_space` を必ず指定する
+- `evaluate()` では `sklearn.base.clone()` を使用してモデルを複製する（fitted 状態をリセットするため `copy.deepcopy` ではなく `clone` を採用）
+
+**SOLIDチェック**
+- S: sklearn 互換モデルの評価のみが責務
 - L: `ModelAdapterBase` の契約（戻り値の型）を守る
 
 ---
