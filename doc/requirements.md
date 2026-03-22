@@ -161,12 +161,13 @@ pandas DataFrame として返却。以下のカラムを含む（最低限）。
 | カラム名 | 型 | 説明 |
 |---|---|---|
 | `trial_id` | `int` | 試行番号 |
-| `params` | `dict` | 試行したパラメータ |
+| （各パラメータ名） | `int` / `float` / `str` | 各パラメータが個別カラムとして展開される（例: `num_leaves`, `learning_rate`） |
 | `score` | `float` | eval_fn が返したスコア |
 | `tool_used` | `str` | 使用したツール名 |
-| `timestamp` | `datetime` | 実行日時 |
+| `timestamp` | `str` | 実行日時（ISO 8601 形式） |
 | `eval_duration` | `float` | モデルの学習・評価にかかった時間（秒） |
 | `algo_duration` | `float` | アルゴリズムが次の実験点を算出するのにかかった時間（秒）。ベイズ最適化なら TPE の提案計算時間、Sobol なら列生成時間、ExpertAgentTool なら LLM API 呼び出し時間 |
+| `reasoning` | `str` | ExpertAgentTool のパラメーター提案理由（他ツールは空文字） |
 
 ### 6.2 テキストレポート（report）
 
