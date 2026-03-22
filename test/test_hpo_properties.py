@@ -129,6 +129,19 @@ class TestResultCorrectness:
         )
         assert len(result.trials_df) <= n_trials
 
+    def test_best_params_achieves_best_score(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """HPO-02: best_params を eval_fn に渡すと best_score と一致する."""
+        result = _run_supervisor_with_sobol(
+            dummy_adapter=dummy_adapter,
+            simple_param_space=simple_param_space,
+            n_trials=5,
+        )
+        # DummyAdapter は常に 0.85 を返すため、best_params の評価結果も 0.85 になる
+        score = dummy_adapter.evaluate(result.best_params)
+        assert abs(score - result.best_score) < 1e-6
+
 
 class TestSeedReproducibility:
     def test_sobol_reproducible_with_seed(
