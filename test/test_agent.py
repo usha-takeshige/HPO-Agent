@@ -947,7 +947,9 @@ class TestSupervisorPlanDisplay:
         llm.invoke.side_effect = [
             AIMessage(
                 content="sobol_search を実行します。",
-                tool_calls=[{"name": "sobol_search", "args": {"n_trials": 5}, "id": "c1"}],
+                tool_calls=[
+                    {"name": "sobol_search", "args": {"n_trials": 5}, "id": "c1"}
+                ],
             ),
             AIMessage(content="完了", tool_calls=[]),
             MagicMock(content="AI 考察テキスト"),
@@ -960,7 +962,8 @@ class TestSupervisorPlanDisplay:
                 param_space=simple_param_space,
             )
         selection_logs = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if "sobol_search" in r.message and "planned" in r.message.lower()
         ]
         assert len(selection_logs) >= 1
@@ -978,7 +981,9 @@ class TestSupervisorPlanDisplay:
         llm.invoke.side_effect = [
             AIMessage(
                 content="sobol_search を実行します。",
-                tool_calls=[{"name": "sobol_search", "args": {"n_trials": 12}, "id": "c1"}],
+                tool_calls=[
+                    {"name": "sobol_search", "args": {"n_trials": 12}, "id": "c1"}
+                ],
             ),
             AIMessage(content="完了", tool_calls=[]),
             MagicMock(content="AI 考察テキスト"),
@@ -991,7 +996,8 @@ class TestSupervisorPlanDisplay:
                 param_space=simple_param_space,
             )
         exec_logs = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if "sobol_search" in r.message
             and "10" in r.message
             and "12" in r.message
