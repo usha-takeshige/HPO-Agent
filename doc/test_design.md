@@ -217,6 +217,8 @@ class TestExpertAgentToolRetry:
 | AGT-11 | シード伝播 | `seed=42` が `SobolSearchTool` に伝播される | `seed=42` で実行 | `SobolSearchTool` のインスタンスが `seed=42` で初期化されている |
 | AGT-12 | シード伝播 | `seed=42` が `BayesianOptimizationTool` に伝播される | `seed=42` で実行 | Optuna の `TPESampler` が `seed=42` で生成されている |
 | AGT-13 | `ExpertAgentTool` 履歴選択 | 30件の履歴からスコア上位20件＋直近10件が選ばれる | `trial_history` が 30 件ある状態で実行 | LLM に渡された JSON の `trial_id` が重複なしで最大 30 件以内 |
+| AGT-20 | `_supervisor_node` | ツール選択直後に選択ツール名と計画試行回数が `logging.INFO` で出力される | LLM が `sobol_search`, `n_trials=5` を返す | `caplog` に `"sobol_search"` と `"planned"` を含む INFO レコードが存在する |
+| AGT-21 | `_tool_executor_node` | ツール実行開始直前に確定試行回数・要求試行回数が `logging.INFO` で出力される | LLM が `n_trials=12` を要求、`n_trials=10` で上限適用 | `caplog` に `"10"`, `"12"`, `"Executing"` を含む INFO レコードが存在する |
 
 ### テストコード骨格
 
