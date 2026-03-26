@@ -102,6 +102,13 @@ class Supervisor:
                 b.get("text", "") if isinstance(b, dict) else str(b) for b in _content
             )
         reasoning = _content if isinstance(_content, str) else ""
+        if response.tool_calls:
+            _tc = response.tool_calls[0]
+            logger.info(
+                "Supervisor selected tool '%s' with %d planned trial(s).",
+                _tc["name"],
+                int(_tc.get("args", {}).get("n_trials", 1)),
+            )
         return {
             "messages": [response],
             "last_tool_reasoning": reasoning,
@@ -137,6 +144,13 @@ class Supervisor:
         assert isinstance(tool, HPOToolBase)
         requested_trials = int(args.get("n_trials", 1))
         n_trials = min(requested_trials, state.remaining_trials)
+        logger.info(
+            "Executing tool '%s': %d trial(s) (requested: %d, remaining: %d).",
+            tool_name,
+            n_trials,
+            requested_trials,
+            state.remaining_trials,
+        )
 
         new_records = tool._run(
             n_trials=n_trials,

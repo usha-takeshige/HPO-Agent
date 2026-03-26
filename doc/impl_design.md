@@ -456,7 +456,7 @@ class ReportGenerator:
 **責務**：LangGraph グラフを構築し、ツール選択・実行ループを制御して HPOResult を返す
 **対応する要件の概念**：4.2 スーパーバイザーエージェント
 
-ツールの実行が完了し結果が返ってくるたびに `ReportGenerator.generate_intermediate()` を呼び出し、中間レポートを `logging.INFO` でコンソール出力する。全試行完了後に `generate_final()` を呼び出して `HPOResult.report` に格納する。
+`_supervisor_node()` でツールを選択した直後（LLM レスポンス確定後）に、選択ツール名と計画試行回数を `logging.INFO` で出力する。また `_tool_executor_node()` のツール実行開始直前（`remaining_trials` による上限適用後）に、確定試行回数・要求試行回数・残り試行数を `logging.INFO` で出力する。ツールの実行が完了し結果が返ってくるたびに `ReportGenerator.generate_intermediate()` を呼び出し、中間レポートを `logging.INFO` でコンソール出力する。全試行完了後に `generate_final()` を呼び出して `HPOResult.report` に格納する。
 
 ```python
 class Supervisor:
