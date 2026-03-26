@@ -930,3 +930,71 @@ class TestNarrowSearchSpaceIntegration:
         assert len(sobol_rows) > 0
         for _, row in sobol_rows.iterrows():
             assert 50 <= row["num_leaves"] <= 70
+
+
+class TestSupervisorPlanDisplay:
+    """AGT-20, AGT-21: スーパーバイザーのツール選択・実行開始ログを検証する."""
+
+    def test_supervisor_selection_log(
+        self,
+        dummy_adapter: Any,
+        simple_param_space: Any,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """AGT-20: ツール選択直後に選択ツール名と計画試行回数が INFO ログに出力される."""
+        llm = MagicMock()
+        llm.bind_tools.return_value = llm
+        llm.invoke.side_effect = [
+            AIMessage(
+                content="sobol_search を実行します。",
+                tool_calls=[{"name": "sobol_search", "args": {"n_trials": 5}, "id": "c1"}],
+            ),
+            AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),
+        ]
+        with caplog.at_level(logging.INFO):
+            _run_with_mock(
+                n_trials=5,
+                llm=llm,
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+            )
+        selection_logs = [
+            r for r in caplog.records
+            if "sobol_search" in r.message and "planned" in r.message.lower()
+        ]
+        assert len(selection_logs) >= 1
+
+    def test_tool_execution_log_with_trial_cap(
+        self,
+        dummy_adapter: Any,
+        simple_param_space: Any,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """AGT-21: ツール実行開始直前に確定試行回数と要求試行回数が INFO ログに出力される."""
+        llm = MagicMock()
+        llm.bind_tools.return_value = llm
+        # LLM が 12 試行を要求するが n_trials=10 で上限適用
+        llm.invoke.side_effect = [
+            AIMessage(
+                content="sobol_search を実行します。",
+                tool_calls=[{"name": "sobol_search", "args": {"n_trials": 12}, "id": "c1"}],
+            ),
+            AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),
+        ]
+        with caplog.at_level(logging.INFO):
+            _run_with_mock(
+                n_trials=10,
+                llm=llm,
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+            )
+        exec_logs = [
+            r for r in caplog.records
+            if "sobol_search" in r.message
+            and "10" in r.message
+            and "12" in r.message
+            and "Executing" in r.message
+        ]
+        assert len(exec_logs) >= 1
