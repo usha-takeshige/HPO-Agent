@@ -142,7 +142,9 @@ def deterministic_eval_fn():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture
-def search_space_change_record(simple_param_space: ParamSpace) -> SearchSpaceChangeRecord:
+def search_space_change_record(
+    simple_param_space: ParamSpace,
+) -> SearchSpaceChangeRecord:
     """SearchSpaceChangeRecord のサンプルインスタンス。"""
     narrowed = ParamSpace(
         specs=(

@@ -14,10 +14,14 @@ def _format_param_space(param_space: ParamSpace) -> str:
     lines = []
     for spec in param_space.specs:
         if spec.type == "categorical":
-            lines.append(f"- **{spec.name}**: categorical, choices={list(spec.choices or [])}")
+            lines.append(
+                f"- **{spec.name}**: categorical, choices={list(spec.choices or [])}"
+            )
         else:
             scale = "log スケール" if spec.log else "linear スケール"
-            lines.append(f"- **{spec.name}**: {spec.type}, [{spec.low}, {spec.high}], {scale}")
+            lines.append(
+                f"- **{spec.name}**: {spec.type}, [{spec.low}, {spec.high}], {scale}"
+            )
     return "\n".join(lines)
 
 
