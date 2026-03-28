@@ -13,7 +13,7 @@ from langgraph.graph import END, StateGraph
 from hpo_agent.models import HPOConfig, HPOResult, ParamSpace, TrialRecord
 from hpo_agent.report import ReportGenerator
 from hpo_agent.state import SupervisorState
-from hpo_agent.tools import HPOToolBase, NarrowSearchSpaceTool
+from hpo_agent.tools import ChangeSearchSpaceTool, HPOToolBase, _describe_param_space
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class Supervisor:
 
     Args:
         llm: Supervisor が使用する LLM インスタンス。
-        tools: 使用可能なツールのリスト（HPOToolBase および NarrowSearchSpaceTool）。
+        tools: 使用可能なツールのリスト（HPOToolBase および ChangeSearchSpaceTool）。
         report_generator: 中間・最終レポート生成器。
         system_prompt: Supervisor への初期システムプロンプト。
         generated_param_space: LLM が自動生成したパラメータ空間。レポートに記載される。
@@ -49,6 +49,7 @@ class Supervisor:
         self._tool_map: dict[str, BaseTool] = {t.name: t for t in tools}
 
     def run(self, config: HPOConfig) -> HPOResult:
+
         """LangGraph グラフを実行して HPOResult を返す。
 
         Args:
@@ -137,9 +138,9 @@ class Supervisor:
                 ]
             }
 
-        # NarrowSearchSpaceTool は試行を実行しない専用処理
-        if isinstance(tool, NarrowSearchSpaceTool):
-            return self._handle_narrow_search_space(tool, args, tool_call_id)
+        # ChangeSearchSpaceTool は試行を実行しない専用処理
+        if isinstance(tool, ChangeSearchSpaceTool):
+            return self._handle_change_search_space(tool, args, tool_call_id)
 
         assert isinstance(tool, HPOToolBase)
         requested_trials = int(args.get("n_trials", 1))
@@ -202,16 +203,16 @@ class Supervisor:
             "current_report": report,
         }
 
-    def _handle_narrow_search_space(
+    def _handle_change_search_space(
         self,
-        tool: NarrowSearchSpaceTool,
+        tool: ChangeSearchSpaceTool,
         args: dict[str, Any],
         tool_call_id: str,
     ) -> dict[str, Any]:
-        """NarrowSearchSpaceTool の実行結果を処理して current_param_space を更新する。
+        """ChangeSearchSpaceTool の実行結果を処理して current_param_space を更新する。
 
         Args:
-            tool: NarrowSearchSpaceTool インスタンス。
+            tool: ChangeSearchSpaceTool インスタンス。
             args: ツール呼び出し引数。
             tool_call_id: ツール呼び出し ID。
 
@@ -219,15 +220,15 @@ class Supervisor:
             状態更新辞書。成功時は current_param_space を含む。
         """
         param_updates: str = args.get("param_updates", "[]")
-        result = tool._build_narrowed_space(param_updates)
+        result = tool._build_changed_space(param_updates)
         if isinstance(result, str):
             # エラーメッセージをそのまま返す
-            logger.warning("[narrow_search_space] %s", result)
+            logger.warning("[change_search_space] %s", result)
             return {
                 "messages": [ToolMessage(content=result, tool_call_id=tool_call_id)]
             }
-        description = tool._describe_param_space(result)
-        logger.info("[narrow_search_space] 探索空間を更新:\n%s", description)
+        description = _describe_param_space(result)
+        logger.info("[change_search_space] 探索空間を更新:\n%s", description)
         return {
             "messages": [
                 ToolMessage(
