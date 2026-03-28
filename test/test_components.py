@@ -492,6 +492,89 @@ class TestReportGenerator:
         )
         assert "42" in report
 
+    def test_generate_intermediate_with_space_change(
+        self,
+        sample_trial_records: list,
+        search_space_change_record: Any,
+    ) -> None:
+        """CMP-SP-01: latest_space_change 指定時に探索空間の変更通知セクションが含まれる."""
+        from hpo_agent.report import ReportGenerator
+
+        gen = ReportGenerator()
+        report = gen.generate_intermediate(
+            trial_records=sample_trial_records,
+            best_params={"num_leaves": 60},
+            best_score=0.90,
+            latest_space_change=search_space_change_record,
+        )
+        assert "探索空間の変更通知" in report
+        assert "変更前" in report
+        assert "変更後" in report
+
+    def test_generate_intermediate_without_space_change(
+        self,
+        sample_trial_records: list,
+    ) -> None:
+        """CMP-SP-02: latest_space_change=None のとき変更通知セクションが含まれない."""
+        from hpo_agent.report import ReportGenerator
+
+        gen = ReportGenerator()
+        report = gen.generate_intermediate(
+            trial_records=sample_trial_records,
+            best_params={"num_leaves": 60},
+            best_score=0.90,
+            latest_space_change=None,
+        )
+        assert "探索空間の変更通知" not in report
+
+    def test_generate_final_with_space_change_history(
+        self,
+        sample_trial_records: list,
+        search_space_change_record: Any,
+    ) -> None:
+        """CMP-SP-03: search_space_change_history 非空のとき変更履歴セクションが含まれる."""
+        from unittest.mock import MagicMock
+
+        from hpo_agent.report import ReportGenerator
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = MagicMock(content="AI 考察テスト")
+
+        gen = ReportGenerator()
+        report = gen.generate_final(
+            trial_records=sample_trial_records,
+            best_params={"num_leaves": 60},
+            best_score=0.90,
+            llm=mock_llm,
+            search_space_change_history=[search_space_change_record],
+        )
+        assert "探索空間の変更履歴" in report
+        assert "変更前" in report
+        assert "変更後" in report
+        assert "試行 5 件完了後" in report
+
+    def test_generate_final_without_space_change_history(
+        self,
+        sample_trial_records: list,
+    ) -> None:
+        """CMP-SP-04: search_space_change_history が空のとき変更履歴セクションが含まれない."""
+        from unittest.mock import MagicMock
+
+        from hpo_agent.report import ReportGenerator
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.return_value = MagicMock(content="AI 考察テスト")
+
+        gen = ReportGenerator()
+        report = gen.generate_final(
+            trial_records=sample_trial_records,
+            best_params={"num_leaves": 60},
+            best_score=0.90,
+            llm=mock_llm,
+            search_space_change_history=[],
+        )
+        assert "探索空間の変更履歴" not in report
+
 
 # ---------------------------------------------------------------------------
 # CMP-01/02/03/04/05/25/26: HPOAgent

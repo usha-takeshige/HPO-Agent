@@ -931,6 +931,84 @@ class TestChangeSearchSpaceIntegration:
         for _, row in sobol_rows.iterrows():
             assert 50 <= row["num_leaves"] <= 70
 
+    def test_final_report_includes_space_change_history(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """AGT-18: change_search_space 実行後の最終レポートに探索空間変更履歴が含まれる."""
+        import json
+
+        from hpo_agent.models import HPOConfig
+        from hpo_agent.report import ReportGenerator
+        from hpo_agent.supervisor import Supervisor
+        from hpo_agent.tools import (
+            BayesianOptimizationTool,
+            ChangeSearchSpaceTool,
+            ExpertAgentTool,
+            SobolSearchTool,
+        )
+
+        change_args = json.dumps([{"name": "num_leaves", "low": 50, "high": 70}])
+        llm = MagicMock()
+        llm.bind_tools.return_value = llm
+        llm.invoke.side_effect = [
+            AIMessage(
+                content="探索空間を変更します。",
+                tool_calls=[
+                    {
+                        "name": "change_search_space",
+                        "args": {"param_updates": change_args},
+                        "id": "c1",
+                    }
+                ],
+            ),
+            AIMessage(content="完了", tool_calls=[]),
+            MagicMock(content="AI 考察テキスト"),
+        ]
+        config = HPOConfig(
+            model=object(),
+            eval_fn=lambda m, X, y: 0.0,
+            n_trials=5,
+            X=None,
+            y=None,
+        )
+        tools = [
+            SobolSearchTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                name="sobol_search",
+                description="test",
+            ),
+            ChangeSearchSpaceTool(
+                param_space=simple_param_space,
+                name="change_search_space",
+                description="test",
+            ),
+            BayesianOptimizationTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                name="bayesian_optimization",
+                description="test",
+            ),
+            ExpertAgentTool(
+                adapter=dummy_adapter,
+                param_space=simple_param_space,
+                llm=MagicMock(),
+                system_prompt="test",
+                name="expert_agent",
+                description="test",
+            ),
+        ]
+        supervisor = Supervisor(
+            llm=llm,
+            tools=tools,
+            report_generator=ReportGenerator(),
+            system_prompt="test",
+        )
+        result = supervisor.run(config)
+        assert "探索空間の変更履歴" in result.report
+        assert "変更前" in result.report
+        assert "変更後" in result.report
+
     def test_subsequent_sobol_uses_expanded_space(
         self, dummy_adapter: Any, simple_param_space: Any
     ) -> None:
