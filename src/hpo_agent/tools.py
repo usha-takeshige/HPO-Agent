@@ -464,9 +464,7 @@ def _describe_param_space(param_space: ParamSpace) -> str:
     for spec in param_space.specs:
         if spec.type == "categorical":
             assert spec.choices is not None
-            lines.append(
-                f"- {spec.name}: categorical, choices={list(spec.choices)}"
-            )
+            lines.append(f"- {spec.name}: categorical, choices={list(spec.choices)}")
         else:
             scale = "log" if spec.log else "linear"
             lines.append(

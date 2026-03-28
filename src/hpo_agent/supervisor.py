@@ -49,7 +49,6 @@ class Supervisor:
         self._tool_map: dict[str, BaseTool] = {t.name: t for t in tools}
 
     def run(self, config: HPOConfig) -> HPOResult:
-
         """LangGraph グラフを実行して HPOResult を返す。
 
         Args:
