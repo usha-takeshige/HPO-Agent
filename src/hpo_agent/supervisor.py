@@ -10,7 +10,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 
-from hpo_agent.models import HPOConfig, HPOResult, ParamSpace, TrialRecord
+from hpo_agent.models import (
+    HPOConfig,
+    HPOResult,
+    ParamSpace,
+    SearchSpaceChangeRecord,
+    TrialRecord,
+)
 from hpo_agent.report import ReportGenerator
 from hpo_agent.state import SupervisorState
 from hpo_agent.tools import ChangeSearchSpaceTool, HPOToolBase, _describe_param_space
@@ -139,7 +145,7 @@ class Supervisor:
 
         # ChangeSearchSpaceTool は試行を実行しない専用処理
         if isinstance(tool, ChangeSearchSpaceTool):
-            return self._handle_change_search_space(tool, args, tool_call_id)
+            return self._handle_change_search_space(tool, args, tool_call_id, state)
 
         assert isinstance(tool, HPOToolBase)
         requested_trials = int(args.get("n_trials", 1))
@@ -207,6 +213,7 @@ class Supervisor:
         tool: ChangeSearchSpaceTool,
         args: dict[str, Any],
         tool_call_id: str,
+        state: SupervisorState,
     ) -> dict[str, Any]:
         """ChangeSearchSpaceTool の実行結果を処理して current_param_space を更新する。
 
@@ -214,10 +221,13 @@ class Supervisor:
             tool: ChangeSearchSpaceTool インスタンス。
             args: ツール呼び出し引数。
             tool_call_id: ツール呼び出し ID。
+            state: 現在の SupervisorState。変更前の空間と試行数の取得に使用。
 
         Returns:
-            状態更新辞書。成功時は current_param_space を含む。
+            状態更新辞書。成功時は current_param_space と search_space_change_history を含む。
         """
+        from datetime import datetime
+
         param_updates: str = args.get("param_updates", "[]")
         result = tool._build_changed_space(param_updates)
         if isinstance(result, str):
@@ -226,8 +236,35 @@ class Supervisor:
             return {
                 "messages": [ToolMessage(content=result, tool_call_id=tool_call_id)]
             }
+
+        old_space = state.current_param_space or tool.param_space
+        change_record = SearchSpaceChangeRecord(
+            trial_id_at_change=len(state.trial_records),
+            timestamp=datetime.now(),
+            old_param_space=old_space,
+            new_param_space=result,
+            reasoning=state.last_tool_reasoning,
+        )
+        updated_history = list(state.search_space_change_history) + [change_record]
+
         description = _describe_param_space(result)
         logger.info("[change_search_space] 探索空間を更新:\n%s", description)
+
+        best_score, best_params = self._find_best(list(state.trial_records))
+        report = self._report_generator.generate_intermediate(
+            trial_records=list(state.trial_records),
+            best_params=best_params,
+            best_score=best_score,
+            seed=state.config.seed,
+            tool_reasoning=state.last_tool_reasoning,
+            latest_space_change=change_record,
+        )
+        logger.info(
+            "[change_search_space] 探索空間を更新しました（試行 %d 件完了後）\n%s",
+            len(state.trial_records),
+            report,
+        )
+
         return {
             "messages": [
                 ToolMessage(
@@ -236,6 +273,7 @@ class Supervisor:
                 )
             ],
             "current_param_space": result,
+            "search_space_change_history": updated_history,
         }
 
     def _should_continue(self, state: SupervisorState) -> Literal["continue", "end"]:
@@ -263,8 +301,12 @@ class Supervisor:
         # LangGraph の invoke は dict を返す場合がある
         if isinstance(final_state, dict):
             trial_records: list[TrialRecord] = final_state.get("trial_records", [])
+            change_history: list[SearchSpaceChangeRecord] = final_state.get(
+                "search_space_change_history", []
+            )
         else:
             trial_records = final_state.trial_records
+            change_history = final_state.search_space_change_history
 
         best_score, best_params = self._find_best(trial_records)
 
@@ -281,6 +323,7 @@ class Supervisor:
             llm=self._llm,
             seed=config.seed,
             generated_param_space=self._generated_param_space,
+            search_space_change_history=change_history,
         )
 
         return HPOResult(

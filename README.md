@@ -209,7 +209,7 @@ result = agent.run()
 | `result.best_params` | `dict` | 最良パラメーターの辞書 |
 | `result.best_score` | `float` | 最良スコア |
 | `result.trials_df` | `pd.DataFrame` | 全試行の履歴テーブル（下表参照） |
-| `result.report` | `str` | Markdown 形式の最終レポート |
+| `result.report` | `str` | Markdown 形式の最終レポート（下記参照） |
 
 ### trials_df のカラム
 
@@ -223,6 +223,18 @@ result = agent.run()
 | `eval_duration` | `float` | モデルの学習・評価にかかった時間（秒） |
 | `algo_duration` | `float` | アルゴリズムが次の実験点を算出するのにかかった時間（秒） |
 | `reasoning` | `str` | AI の判断理由（ツール選択理由またはパラメーター提案理由） |
+
+### レポートの内容
+
+`result.report` は Markdown 形式で以下のセクションを含みます。
+
+- **最良結果サマリー**：最良パラメーターとスコア
+- **スコア推移**：試行ごとのスコア変化
+- **ツール使用内訳**：各ツールの使用回数
+- **探索空間の変更履歴**（`ChangeSearchSpaceTool` が呼ばれた場合）：変更回数・各変更時点の試行数・変更前後の探索空間
+- **AI 判断理由の記録**：各ステップでのツール選択・パラメーター提案の根拠
+- **全試行の時間サマリー**：総最適化時間・ツール別平均実行時間
+- **AI 考察**：LLM による最適化傾向の分析・改善提案
 
 ### レポートの保存
 

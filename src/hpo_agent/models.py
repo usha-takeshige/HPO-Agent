@@ -166,6 +166,25 @@ class HPOConfig:
 
 
 @dataclass
+class SearchSpaceChangeRecord:
+    """探索空間の変更イベントを保持する。
+
+    Attributes:
+        trial_id_at_change: 変更時点で完了していた試行数。
+        timestamp: 変更が行われた日時。
+        old_param_space: 変更前の探索空間。
+        new_param_space: 変更後の探索空間。
+        reasoning: Supervisor のツール選択理由。
+    """
+
+    trial_id_at_change: int
+    timestamp: datetime
+    old_param_space: ParamSpace
+    new_param_space: ParamSpace
+    reasoning: str = ""
+
+
+@dataclass
 class HPOResult:
     """最終出力（最良パラメータ・スコア・履歴・レポート）を保持する。
 

@@ -8,7 +8,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, ConfigDict
 
-from hpo_agent.models import HPOConfig, ParamSpace, TrialRecord
+from hpo_agent.models import HPOConfig, ParamSpace, SearchSpaceChangeRecord, TrialRecord
 
 
 class SupervisorState(BaseModel):
@@ -23,6 +23,7 @@ class SupervisorState(BaseModel):
         last_tool_reasoning: Supervisor が最後に出力したツール選択理由。
         current_param_space: change_search_space ツールによって更新された探索空間。
             None の場合は各ツールのデフォルト param_space を使用する。
+        search_space_change_history: 探索空間変更イベントの履歴リスト。
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -34,3 +35,4 @@ class SupervisorState(BaseModel):
     current_report: str = ""
     last_tool_reasoning: str = ""
     current_param_space: ParamSpace | None = None
+    search_space_change_history: list[SearchSpaceChangeRecord] = []

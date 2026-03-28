@@ -15,7 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from hpo_agent.adapters import ModelAdapterBase
-from hpo_agent.models import ParamSpace, ParamSpec, TrialRecord
+from hpo_agent.models import ParamSpace, ParamSpec, SearchSpaceChangeRecord, TrialRecord
 
 # ---------------------------------------------------------------------------
 # DummyAdapter（全テストで共用）
@@ -139,6 +139,31 @@ def deterministic_eval_fn():  # type: ignore[no-untyped-def]
         return -((num_leaves - 64) ** 2) / 10000 + 0.9
 
     return eval_fn
+
+
+@pytest.fixture
+def search_space_change_record(
+    simple_param_space: ParamSpace,
+) -> SearchSpaceChangeRecord:
+    """SearchSpaceChangeRecord のサンプルインスタンス。"""
+    narrowed = ParamSpace(
+        specs=(
+            ParamSpec(name="num_leaves", type="int", low=40, high=80),
+            ParamSpec(name="learning_rate", type="float", low=0.05, high=0.2, log=True),
+            ParamSpec(
+                name="boosting_type",
+                type="categorical",
+                choices=("gbdt",),
+            ),
+        )
+    )
+    return SearchSpaceChangeRecord(
+        trial_id_at_change=5,
+        timestamp=datetime(2026, 3, 28, 12, 0, 0),
+        old_param_space=simple_param_space,
+        new_param_space=narrowed,
+        reasoning="有望な範囲に絞り込みます。",
+    )
 
 
 @pytest.fixture
