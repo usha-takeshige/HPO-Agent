@@ -6,7 +6,19 @@ from collections import Counter
 from datetime import datetime
 from typing import Any
 
-from hpo_agent.models import ParamSpace, TrialRecord
+from hpo_agent.models import ParamSpace, SearchSpaceChangeRecord, TrialRecord
+
+
+def _format_param_space(param_space: ParamSpace) -> str:
+    """ParamSpace を Markdown 箇条書き文字列にフォーマットする。"""
+    lines = []
+    for spec in param_space.specs:
+        if spec.type == "categorical":
+            lines.append(f"- **{spec.name}**: categorical, choices={list(spec.choices or [])}")
+        else:
+            scale = "log スケール" if spec.log else "linear スケール"
+            lines.append(f"- **{spec.name}**: {spec.type}, [{spec.low}, {spec.high}], {scale}")
+    return "\n".join(lines)
 
 
 class ReportGenerator:
@@ -25,6 +37,7 @@ class ReportGenerator:
         tool_reasoning: str = "",
         current_tool_records: list[TrialRecord] | None = None,
         title: str = "# HPO 中間レポート",
+        latest_space_change: SearchSpaceChangeRecord | None = None,
     ) -> str:
         """中間レポートを生成する（LLM 不要）。
 
@@ -36,6 +49,7 @@ class ReportGenerator:
             tool_reasoning: Supervisor が今回のツールを選択した理由。
             current_tool_records: 今回のツール実行で得た TrialRecord リスト。
             title: レポートの見出し（最終レポートでは "# HPO 最終レポート" を渡す）。
+            latest_space_change: 今回の実行で行われた探索空間変更。指定時は変更通知セクションを追加。
 
         Returns:
             Markdown 形式のレポート文字列。
@@ -77,6 +91,22 @@ class ReportGenerator:
             "|---------|---------|",
             tool_summary,
         ]
+
+        # 探索空間の変更通知
+        if latest_space_change is not None:
+            old_desc = _format_param_space(latest_space_change.old_param_space)
+            new_desc = _format_param_space(latest_space_change.new_param_space)
+            lines += [
+                "",
+                "## 探索空間の変更通知",
+                f"- 変更時点の試行数: {latest_space_change.trial_id_at_change}",
+                "",
+                "**変更前:**",
+                old_desc,
+                "",
+                "**変更後:**",
+                new_desc,
+            ]
 
         # Supervisor のツール選択理由
         if tool_reasoning:
@@ -122,6 +152,7 @@ class ReportGenerator:
         llm: Any,
         seed: int | None = None,
         generated_param_space: ParamSpace | None = None,
+        search_space_change_history: list[SearchSpaceChangeRecord] | None = None,
     ) -> str:
         """最終レポートを生成する（LLM による AI 考察を含む）。
 
@@ -132,6 +163,7 @@ class ReportGenerator:
             llm: LLM インスタンス（AI 考察用）。
             seed: 乱数シード。
             generated_param_space: LLM が自動生成したパラメータ空間。指定時はレポートに記載。
+            search_space_change_history: 探索空間変更履歴。指定時は変更履歴セクションを追加。
 
         Returns:
             Markdown 形式のレポート文字列。
@@ -145,6 +177,28 @@ class ReportGenerator:
             seed=seed,
             title="# HPO 最終レポート",
         )
+
+        # 探索空間の変更履歴セクション
+        change_history_lines: list[str] = []
+        if search_space_change_history:
+            change_history_lines += [
+                "",
+                "## 探索空間の変更履歴",
+                "",
+                f"{len(search_space_change_history)} 回の変更がありました。",
+            ]
+            for i, record in enumerate(search_space_change_history, start=1):
+                ts = record.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                change_history_lines += [
+                    "",
+                    f"### 変更 {i}（試行 {record.trial_id_at_change} 件完了後 / {ts}）",
+                    "",
+                    "**変更前:**",
+                    _format_param_space(record.old_param_space),
+                    "",
+                    "**変更後:**",
+                    _format_param_space(record.new_param_space),
+                ]
 
         # LLM が自動生成したパラメータ空間のセクション
         generated_space_lines: list[str] = []
@@ -204,6 +258,7 @@ class ReportGenerator:
 
         full_report = (
             base
+            + "\n".join(change_history_lines)
             + "\n".join(generated_space_lines)
             + "\n".join(reasoning_lines)
             + "\n".join(timing_lines)
