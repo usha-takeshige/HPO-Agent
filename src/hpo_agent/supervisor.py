@@ -258,16 +258,6 @@ class Supervisor:
             description,
         )
 
-        best_score, best_params = self._find_best(list(state.trial_records))
-        report = self._report_generator.generate_intermediate(
-            trial_records=list(state.trial_records),
-            best_params=best_params,
-            best_score=best_score,
-            seed=state.config.seed,
-            tool_reasoning=state.last_tool_reasoning,
-            latest_space_change=change_record,
-        )
-
         return {
             "messages": [
                 ToolMessage(

@@ -623,7 +623,8 @@ class TestAutoParamSpaceGeneration:
                 agent.run()
 
         assert any(
-            "Auto-generated" in record.message or "param_space" in record.message.lower()
+            "Auto-generated" in record.message
+            or "param_space" in record.message.lower()
             for record in caplog.records
         )
 
