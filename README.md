@@ -158,11 +158,11 @@ print(result.best_params)
 | `SobolSearchTool` | Sobol 列による準ランダム探索 | 探索序盤で空間を均一にカバーする |
 | `BayesianOptimizationTool` | Optuna TPE サンプラーによるベイズ最適化 | これまでの試行結果を活用して効率的に探索する |
 | `ExpertAgentTool` | 専門家 AI エージェントによる決め打ち探索 | 試行履歴を分析し、有望なパラメーターを直接提案する |
-| `NarrowSearchSpaceTool` | 探索空間の動的絞り込み | 有望な範囲が特定できたとき、LLM が自動的に探索空間を狭める |
+| `ChangeSearchSpaceTool` | 探索空間の動的変更 | 有望な範囲に絞り込んだり、狭めすぎた空間を広げたりする |
 
 > **補足**
-> `NarrowSearchSpaceTool` は LLM が「有望な範囲が見えてきた」と判断したタイミングで自動呼び出されます。
-> 以降の探索（`SobolSearchTool` / `BayesianOptimizationTool` / `ExpertAgentTool`）は、絞り込まれた空間を対象に動作します。
+> `ChangeSearchSpaceTool` は LLM が探索空間の調整が必要と判断したタイミングで自動呼び出されます。
+> 以降の探索（`SobolSearchTool` / `BayesianOptimizationTool` / `ExpertAgentTool`）は、変更後の空間を対象に動作します。
 
 ---
 

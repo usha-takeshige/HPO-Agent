@@ -447,25 +447,48 @@ class ExpertAgentTool(HPOToolBase):
 
 
 # ---------------------------------------------------------------------------
-# NarrowSearchSpaceTool
+# ChangeSearchSpaceTool
 # ---------------------------------------------------------------------------
 
 
-class NarrowSearchSpaceTool(BaseTool):
-    """過去の探索結果をもとに探索空間を狭めるツール。
+def _describe_param_space(param_space: ParamSpace) -> str:
+    """ParamSpace をテキスト形式で説明する。
+
+    Args:
+        param_space: 説明対象の ParamSpace。
+
+    Returns:
+        各パラメータの仕様を1行ずつ列挙した文字列。
+    """
+    lines: list[str] = []
+    for spec in param_space.specs:
+        if spec.type == "categorical":
+            assert spec.choices is not None
+            lines.append(f"- {spec.name}: categorical, choices={list(spec.choices)}")
+        else:
+            scale = "log" if spec.log else "linear"
+            lines.append(
+                f"- {spec.name}: {spec.type},"
+                f" low={spec.low}, high={spec.high}, scale={scale}"
+            )
+    return "\n".join(lines)
+
+
+class ChangeSearchSpaceTool(BaseTool):
+    """探索空間を自由に変更するツール（狭め・拡大どちらも可能）。
 
     スーパーバイザーの LLM がこのツールを呼び出すと、SupervisorState の
     current_param_space が更新され、以降の探索ツール（SobolSearchTool,
-    BayesianOptimizationTool, ExpertAgentTool）は狭めた空間を使用する。
+    BayesianOptimizationTool, ExpertAgentTool）は更新された空間を使用する。
 
     入力 (param_updates) は JSON 配列文字列で、各要素は更新するパラメータの仕様を表す。
-    数値型の例: [{"name": "learning_rate", "low": 0.05, "high": 0.1}]
-    カテゴリカル型の例: [{"name": "boosting_type", "choices": ["gbdt"]}]
+    数値型の例: [{"name": "learning_rate", "low": 0.001, "high": 0.5}]
+    カテゴリカル型の例: [{"name": "boosting_type", "choices": ["gbdt", "dart"]}]
 
     検証ルール:
         - name が元の param_space に存在すること。
-        - 数値型: new_low >= original.low かつ new_high <= original.high かつ new_low < new_high。
-        - categorical 型: new_choices が original.choices の部分集合であること。
+        - 数値型: new_low < new_high であること（原空間との大小比較なし）。
+        - categorical 型: new_choices が空でないこと。
 
     更新対象外のパラメータは元の仕様を引き継ぐ。
     エラー発生時は "Error: ..." で始まる文字列を返す。
@@ -485,13 +508,15 @@ class NarrowSearchSpaceTool(BaseTool):
             成功時: 新しい param_space の説明文字列。
             失敗時: "Error: ..." で始まるエラーメッセージ文字列。
         """
-        result = self._build_narrowed_space(param_updates)
+        result = self._build_changed_space(param_updates)
         if isinstance(result, str):
             return result
-        return self._describe_param_space(result)
+        return _describe_param_space(result)
 
-    def _build_narrowed_space(self, param_updates: str) -> ParamSpace | str:
+    def _build_changed_space(self, param_updates: str) -> ParamSpace | str:
         """param_updates を解析・検証して新しい ParamSpace を返す。
+
+        原空間の境界値との大小比較は行わず、任意の有効な範囲を受け付ける。
 
         Args:
             param_updates: JSON 配列文字列。
@@ -518,16 +543,6 @@ class NarrowSearchSpaceTool(BaseTool):
                 assert original.low is not None and original.high is not None
                 new_low: float = float(update.get("low", original.low))
                 new_high: float = float(update.get("high", original.high))
-                if new_low < original.low:
-                    return (
-                        f"Error: '{name}' の low={new_low} は"
-                        f" 元の low={original.low} より小さくできません。"
-                    )
-                if new_high > original.high:
-                    return (
-                        f"Error: '{name}' の high={new_high} は"
-                        f" 元の high={original.high} より大きくできません。"
-                    )
                 if new_low >= new_high:
                     return (
                         f"Error: '{name}' の low={new_low} は"
@@ -541,12 +556,10 @@ class NarrowSearchSpaceTool(BaseTool):
                     log=original.log,
                 )
             elif original.type == "categorical":
-                assert original.choices is not None
-                raw_choices = update.get("choices", list(original.choices))
+                raw_choices = update.get("choices", list(original.choices or ()))
                 new_choices = tuple(raw_choices)
-                invalid = set(new_choices) - set(original.choices)
-                if invalid:
-                    return f"Error: '{name}' の choices に元にない値が含まれます: {invalid}"
+                if not new_choices:
+                    return f"Error: '{name}' の choices は空にできません。"
                 updated_specs[name] = ParamSpec(
                     name=name,
                     type="categorical",
@@ -559,27 +572,3 @@ class NarrowSearchSpaceTool(BaseTool):
             new_specs.append(updated_specs.get(spec.name, spec))
 
         return ParamSpace(specs=tuple(new_specs))
-
-    def _describe_param_space(self, param_space: ParamSpace) -> str:
-        """ParamSpace をテキスト形式で説明する。
-
-        Args:
-            param_space: 説明対象の ParamSpace。
-
-        Returns:
-            各パラメータの仕様を1行ずつ列挙した文字列。
-        """
-        lines: list[str] = []
-        for spec in param_space.specs:
-            if spec.type == "categorical":
-                assert spec.choices is not None
-                lines.append(
-                    f"- {spec.name}: categorical, choices={list(spec.choices)}"
-                )
-            else:
-                scale = "log" if spec.log else "linear"
-                lines.append(
-                    f"- {spec.name}: {spec.type},"
-                    f" low={spec.low}, high={spec.high}, scale={scale}"
-                )
-        return "\n".join(lines)

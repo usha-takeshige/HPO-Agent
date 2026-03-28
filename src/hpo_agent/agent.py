@@ -34,8 +34,8 @@ from hpo_agent.report import ReportGenerator
 from hpo_agent.supervisor import Supervisor
 from hpo_agent.tools import (
     BayesianOptimizationTool,
+    ChangeSearchSpaceTool,
     ExpertAgentTool,
-    NarrowSearchSpaceTool,
     SobolSearchTool,
 )
 
@@ -293,13 +293,15 @@ class HPOAgent:
                 name="expert_agent",
                 description="専門家 AI エージェントによる決め打ち探索",
             ),
-            NarrowSearchSpaceTool(
+            ChangeSearchSpaceTool(
                 param_space=param_space,
-                name="narrow_search_space",
+                name="change_search_space",
                 description=(
-                    "過去の探索結果をもとに探索空間を狭める。"
+                    "探索空間を変更する（狭め・拡大どちらも可能）。"
+                    "有望な範囲が特定できた場合に絞り込み、"
+                    "狭めすぎた場合や新たな領域を探索したい場合に拡大する。"
                     "param_updates に JSON 文字列で新しい範囲を指定する。"
-                    '例: [{"name": "learning_rate", "low": 0.05, "high": 0.1}]'
+                    '例: [{"name": "learning_rate", "low": 0.001, "high": 0.5}]'
                 ),
             ),
         ]

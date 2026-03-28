@@ -831,76 +831,100 @@ class TestParamSpaceSchema:
 
 
 # ---------------------------------------------------------------------------
-# CMP-35〜41: NarrowSearchSpaceTool
+# CMP-35〜42: ChangeSearchSpaceTool
 # ---------------------------------------------------------------------------
 
 
-class TestNarrowSearchSpaceTool:
+class TestChangeSearchSpaceTool:
     def test_valid_update_returns_description(
-        self, narrow_search_space_tool: Any
+        self, change_search_space_tool: Any
     ) -> None:
         """CMP-35: 有効な param_updates で説明文字列を返す（"Error" を含まない）."""
         import json
 
         updates = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
-        result = narrow_search_space_tool._run(param_updates=updates)
+        result = change_search_space_tool._run(param_updates=updates)
         assert isinstance(result, str)
         assert "Error" not in result
         assert "num_leaves" in result
 
     def test_unknown_param_name_returns_error(
-        self, narrow_search_space_tool: Any
+        self, change_search_space_tool: Any
     ) -> None:
         """CMP-36: 存在しないパラメータ名 → "Error" を含む文字列を返す."""
         import json
 
         updates = json.dumps([{"name": "nonexistent", "low": 0.1, "high": 0.2}])
-        result = narrow_search_space_tool._run(param_updates=updates)
+        result = change_search_space_tool._run(param_updates=updates)
         assert "Error" in result
 
-    def test_expanding_low_returns_error(self, narrow_search_space_tool: Any) -> None:
-        """CMP-37: 数値型の low を元より小さく指定 → "Error" を含む文字列."""
+    def test_expanding_beyond_original_succeeds(
+        self, change_search_space_tool: Any
+    ) -> None:
+        """CMP-37: 数値型の low を元より小さく（拡大方向に）指定しても成功する."""
         import json
 
-        # num_leaves の original low は 20
+        # num_leaves の original low は 20 → 10 に拡大しても OK
         updates = json.dumps([{"name": "num_leaves", "low": 10, "high": 80}])
-        result = narrow_search_space_tool._run(param_updates=updates)
-        assert "Error" in result
+        result = change_search_space_tool._run(param_updates=updates)
+        assert "Error" not in result
+        assert "num_leaves" in result
 
-    def test_invalid_categorical_choices_returns_error(
-        self, narrow_search_space_tool: Any
+    def test_expanding_categorical_with_new_choices_succeeds(
+        self, change_search_space_tool: Any
     ) -> None:
-        """CMP-38: categorical で元にない選択肢を指定 → "Error" を含む文字列."""
+        """CMP-38: categorical で元にない選択肢を追加しても成功する."""
         import json
 
-        # boosting_type の original choices は ("gbdt", "dart")
+        # boosting_type の original choices は ("gbdt", "dart") → 新たに "goss" を追加
         updates = json.dumps([{"name": "boosting_type", "choices": ["gbdt", "goss"]}])
-        result = narrow_search_space_tool._run(param_updates=updates)
+        result = change_search_space_tool._run(param_updates=updates)
+        assert "Error" not in result
+        assert "boosting_type" in result
+
+    def test_empty_categorical_choices_returns_error(
+        self, change_search_space_tool: Any
+    ) -> None:
+        """CMP-38b: categorical で空の choices を指定 → "Error" を含む文字列."""
+        import json
+
+        updates = json.dumps([{"name": "boosting_type", "choices": []}])
+        result = change_search_space_tool._run(param_updates=updates)
         assert "Error" in result
 
-    def test_build_narrowed_space_returns_param_space(
-        self, narrow_search_space_tool: Any
+    def test_low_greater_than_high_returns_error(
+        self, change_search_space_tool: Any
     ) -> None:
-        """CMP-39: _build_narrowed_space が有効入力で ParamSpace を返し、値が反映される."""
+        """CMP-38c: new_low >= new_high の場合 → "Error" を含む文字列."""
+        import json
+
+        updates = json.dumps([{"name": "num_leaves", "low": 80, "high": 30}])
+        result = change_search_space_tool._run(param_updates=updates)
+        assert "Error" in result
+
+    def test_build_changed_space_returns_param_space(
+        self, change_search_space_tool: Any
+    ) -> None:
+        """CMP-39: _build_changed_space が有効入力で ParamSpace を返し、値が反映される."""
         import json
 
         from hpo_agent.models import ParamSpace
 
         updates = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
-        result = narrow_search_space_tool._build_narrowed_space(updates)
+        result = change_search_space_tool._build_changed_space(updates)
         assert isinstance(result, ParamSpace)
         nl_spec = next(s for s in result.specs if s.name == "num_leaves")
         assert nl_spec.low == 30.0
         assert nl_spec.high == 80.0
 
-    def test_unmodified_params_preserved(self, narrow_search_space_tool: Any) -> None:
+    def test_unmodified_params_preserved(self, change_search_space_tool: Any) -> None:
         """CMP-40: 更新対象でないパラメータは元の値を引き継ぐ."""
         import json
 
         from hpo_agent.models import ParamSpace
 
         updates = json.dumps([{"name": "num_leaves", "low": 30, "high": 80}])
-        result = narrow_search_space_tool._build_narrowed_space(updates)
+        result = change_search_space_tool._build_changed_space(updates)
         assert isinstance(result, ParamSpace)
         lr_spec = next(s for s in result.specs if s.name == "learning_rate")
         assert lr_spec.low == 0.01
@@ -909,11 +933,11 @@ class TestNarrowSearchSpaceTool:
     def test_sobol_uses_effective_param_space(
         self, dummy_adapter: Any, simple_param_space: Any
     ) -> None:
-        """CMP-41: SobolSearchTool に effective_param_space を渡すと狭めた範囲内でサンプリング."""
+        """CMP-41: SobolSearchTool に effective_param_space を渡すと指定した範囲内でサンプリング."""
         from hpo_agent.models import ParamSpace, ParamSpec
         from hpo_agent.tools import SobolSearchTool
 
-        narrow_space = ParamSpace(
+        changed_space = ParamSpace(
             specs=(
                 ParamSpec(name="num_leaves", type="int", low=50, high=70),
                 ParamSpec(
@@ -930,9 +954,44 @@ class TestNarrowSearchSpaceTool:
             description="test",
         )
         results = tool._run(
-            n_trials=10, trial_history=[], effective_param_space=narrow_space
+            n_trials=10, trial_history=[], effective_param_space=changed_space
         )
         for r in results:
             assert 50 <= r.params["num_leaves"] <= 70
             assert 0.05 <= r.params["learning_rate"] <= 0.1
             assert r.params["boosting_type"] == "gbdt"
+
+    def test_sobol_uses_expanded_param_space(
+        self, dummy_adapter: Any, simple_param_space: Any
+    ) -> None:
+        """CMP-42: 拡大した空間を渡すと元の上限を超える範囲でもサンプリングされる."""
+        from hpo_agent.models import ParamSpace, ParamSpec
+        from hpo_agent.tools import SobolSearchTool
+
+        # num_leaves を original の high=200 より大きい 500 まで拡大
+        expanded_space = ParamSpace(
+            specs=(
+                ParamSpec(name="num_leaves", type="int", low=20, high=500),
+                ParamSpec(
+                    name="learning_rate", type="float", low=0.01, high=0.3, log=True
+                ),
+                ParamSpec(
+                    name="boosting_type",
+                    type="categorical",
+                    choices=("gbdt", "dart"),
+                ),
+            )
+        )
+        tool = SobolSearchTool(
+            adapter=dummy_adapter,
+            param_space=simple_param_space,
+            seed=0,
+            name="sobol_search",
+            description="test",
+        )
+        results = tool._run(
+            n_trials=20, trial_history=[], effective_param_space=expanded_space
+        )
+        # すべての試行が拡大後の範囲内に収まっていることを確認
+        for r in results:
+            assert 20 <= r.params["num_leaves"] <= 500

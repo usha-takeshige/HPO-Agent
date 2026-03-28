@@ -21,7 +21,7 @@ class SupervisorState(BaseModel):
         config: エージェント実行設定。
         current_report: 最新の中間レポート文字列。
         last_tool_reasoning: Supervisor が最後に出力したツール選択理由。
-        current_param_space: narrow_search_space ツールによって更新された探索空間。
+        current_param_space: change_search_space ツールによって更新された探索空間。
             None の場合は各ツールのデフォルト param_space を使用する。
     """
 
