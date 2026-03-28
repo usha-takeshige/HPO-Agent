@@ -39,7 +39,7 @@
 | `BayesianOptimizationTool` | 具象クラス | Optuna によるベイズ最適化を実行する | 4.3 BayesianOptimizationTool |
 | `SobolSearchTool` | 具象クラス | Sobol 列による準ランダム探索を実行する | 4.3 SobolSearchTool |
 | `ExpertAgentTool` | 具象クラス | 専門家 AI エージェントによる決め打ち探索を実行する | 4.3 ExpertAgentTool |
-| `NarrowSearchSpaceTool` | 具象クラス | 過去の探索結果をもとに探索空間を狭め、`current_param_space` を更新する | 探索空間の動的絞り込み |
+| `ChangeSearchSpaceTool` | 具象クラス | 過去の探索結果をもとに探索空間を変更し（狭め・拡大）、`current_param_space` を更新する | 探索空間の動的変更 |
 | `ReportGenerator` | 具象クラス | 試行履歴から Markdown レポートを生成する | 6.2 テキストレポート |
 | `Supervisor` | 具象クラス | LangGraph グラフを構築し、ツール選択ループを制御する | 4.2 スーパーバイザーエージェント |
 | `HPOAgent` | 具象クラス | ユーザーに公開するエントリーポイントとして run() を提供する | 3.1 基本的な使い方 |
@@ -178,7 +178,7 @@ class SupervisorState(BaseModel):
     config: HPOConfig
     current_report: str = ""                       # 直近の中間レポート（ツール実行ごとに更新）
     last_tool_reasoning: str = ""                  # 直前のツール選択理由（Supervisor が出力した理由）
-    current_param_space: ParamSpace | None = None  # narrow_search_space による絞り込み後の空間
+    current_param_space: ParamSpace | None = None  # change_search_space による変更後の空間
 ```
 
 **SOLIDチェック**
@@ -386,21 +386,20 @@ class ExpertAgentTool(HPOToolBase):
 
 ---
 
-#### `NarrowSearchSpaceTool`
+#### `ChangeSearchSpaceTool`
 
 **種別**：具象クラス（BaseTool）
 **責務**：LLM から受け取った `param_updates` を検証して `ParamSpace` を更新する。試行は実行しない。
-**対応する要件の概念**：探索空間の動的絞り込み
+**対応する要件の概念**：探索空間の動的変更（狭め・拡大）
 
 ```python
-class NarrowSearchSpaceTool(BaseTool):
-    name: str = "narrow_search_space"
-    description: str = "過去の探索結果をもとに探索空間を狭める"
+class ChangeSearchSpaceTool(BaseTool):
+    name: str = "change_search_space"
+    description: str = "探索空間を変更する（狭め・拡大どちらも可能）"
     param_space: ParamSpace
 
     def _run(self, param_updates: str) -> str: ...
-    def _build_narrowed_space(self, param_updates: str) -> ParamSpace | str: ...
-    def _describe_param_space(self, param_space: ParamSpace) -> str: ...
+    def _build_changed_space(self, param_updates: str) -> ParamSpace | str: ...
 ```
 
 **SOLIDチェック**
@@ -759,11 +758,10 @@ classDiagram
         +_run(n_trials: int, trial_history: list) list
     }
 
-    class NarrowSearchSpaceTool {
+    class ChangeSearchSpaceTool {
         -param_space: ParamSpace
         +_run(param_updates: str) str
-        +_build_narrowed_space(param_updates: str) ParamSpace
-        +_describe_param_space(param_space: ParamSpace) str
+        +_build_changed_space(param_updates: str) ParamSpace
     }
 
     class ReportGenerator {
@@ -817,7 +815,7 @@ classDiagram
     HPOToolBase <|-- SobolSearchTool : implements
     HPOToolBase <|-- ExpertAgentTool : implements
 
-    Supervisor --> NarrowSearchSpaceTool : uses
+    Supervisor --> ChangeSearchSpaceTool : uses
     Supervisor --> SupervisorState : manages
     Supervisor --> HPOToolBase : invokes
     Supervisor --> ReportGenerator : uses

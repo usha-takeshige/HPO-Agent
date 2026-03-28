@@ -123,7 +123,7 @@ print(result.best_params)     # 最良パラメータ
 | `BayesianOptimizationTool` | ベイズ最適化による探索（Optuna 等を利用） | MVP |
 | `SobolSearchTool` | Sobol 列による準ランダム探索 | MVP |
 | `ExpertAgentTool` | 専門家 AI エージェントによる決め打ち探索 | MVP |
-| `NarrowSearchSpaceTool` | 過去の探索結果をもとに探索空間を動的に狭める | MVP |
+| `ChangeSearchSpaceTool` | 過去の探索結果をもとに探索空間を動的に変更する（狭め・拡大） | MVP |
 
 > ツールはインターフェースを定義し、追加・差し替えが容易な設計とする。
 
