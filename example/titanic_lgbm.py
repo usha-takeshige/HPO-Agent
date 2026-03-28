@@ -91,6 +91,9 @@ def eval_fn(model: lgb.LGBMClassifier, X: pd.DataFrame, y: pd.Series) -> float:
 def main() -> None:
     """HPO-Agent を使って Titanic の LightGBM モデルを最適化する。"""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("google").setLevel(logging.WARNING)
     print("=== Titanic LightGBM HPO-Agent Example ===\n")
 
     # データ読み込み
@@ -113,7 +116,7 @@ def main() -> None:
         seed=42,
     )
 
-    print("最適化を開始します（n_trials=20）...\n")
+    print("Starting optimization (n_trials=20)...\n")
     result = agent.run()
 
     # 結果表示
