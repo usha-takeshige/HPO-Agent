@@ -142,13 +142,13 @@ def deterministic_eval_fn():  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture
-def narrow_search_space_tool(simple_param_space: ParamSpace) -> Any:
-    """NarrowSearchSpaceTool フィクスチャ（simple_param_space を使用）。"""
-    from hpo_agent.tools import NarrowSearchSpaceTool
+def change_search_space_tool(simple_param_space: ParamSpace) -> Any:
+    """ChangeSearchSpaceTool フィクスチャ（simple_param_space を使用）。"""
+    from hpo_agent.tools import ChangeSearchSpaceTool
 
-    return NarrowSearchSpaceTool(
+    return ChangeSearchSpaceTool(
         param_space=simple_param_space,
-        name="narrow_search_space",
+        name="change_search_space",
         description="test",
     )
 
