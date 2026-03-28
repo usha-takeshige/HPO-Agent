@@ -23,6 +23,7 @@
 | `ParamSpec` | データクラス（frozen） | 1つのハイパーパラメータの型・範囲・スケールを保持する | モデルアダプターのパラメータ空間定義 |
 | `ParamSpace` | データクラス（frozen） | パラメータ仕様の集合を保持する | モデルアダプターのパラメータ空間定義 |
 | `TrialRecord` | データクラス | 1回の試行結果を保持する | 6.1 試行履歴テーブル |
+| `SearchSpaceChangeRecord` | データクラス | 探索空間変更イベント（変更前後の空間・変更時点の試行数・日時）を保持する | 6.2 テキストレポート |
 | `HPOResult` | データクラス | 最終出力（最良パラメータ・スコア・履歴・レポート）を保持する | 3.3 出力（HPOResult） |
 | `SupervisorState` | Pydantic モデル | LangGraph グラフの状態を保持する | 4.2 スーパーバイザーエージェント |
 | `LLMProviderBase` | 抽象クラス | LLMインスタンスを提供するインターフェースを定義する | 5.3 拡張性 |
@@ -143,6 +144,28 @@ class TrialRecord:
 
 ---
 
+#### `SearchSpaceChangeRecord`
+
+**種別**：データクラス（mutable）
+**責務**：探索空間変更イベント（変更前後の空間・変更時点の試行数・日時・Supervisor の理由）を保持する
+**対応する要件の概念**：6.2 テキストレポート
+
+```python
+@dataclass
+class SearchSpaceChangeRecord:
+    trial_id_at_change: int      # 変更時点で完了していた試行数
+    timestamp: datetime          # 変更が行われた日時
+    old_param_space: ParamSpace  # 変更前の探索空間
+    new_param_space: ParamSpace  # 変更後の探索空間
+    reasoning: str = ""          # Supervisor のツール選択理由
+```
+
+**SOLIDチェック**
+- S: 探索空間変更イベントの記録保持のみが責務
+- D: データ保持クラスのため DIP 対象外
+
+---
+
 #### `HPOResult`
 
 **種別**：データクラス（mutable）
@@ -176,9 +199,10 @@ class SupervisorState(BaseModel):
     trial_records: list[TrialRecord]
     remaining_trials: int
     config: HPOConfig
-    current_report: str = ""                       # 直近の中間レポート（ツール実行ごとに更新）
-    last_tool_reasoning: str = ""                  # 直前のツール選択理由（Supervisor が出力した理由）
-    current_param_space: ParamSpace | None = None  # change_search_space による変更後の空間
+    current_report: str = ""                                              # 直近の中間レポート（ツール実行ごとに更新）
+    last_tool_reasoning: str = ""                                         # 直前のツール選択理由（Supervisor が出力した理由）
+    current_param_space: ParamSpace | None = None                         # change_search_space による変更後の空間
+    search_space_change_history: list[SearchSpaceChangeRecord] = []       # 探索空間変更イベントの履歴
 ```
 
 **SOLIDチェック**
@@ -427,8 +451,11 @@ class ReportGenerator:
         tool_reasoning: str = "",
         current_tool_records: list[TrialRecord] | None = None,
         title: str = "# HPO 中間レポート",
+        latest_space_change: SearchSpaceChangeRecord | None = None,  # ChangeSearchSpaceTool 実行時に渡す
     ) -> str:
-        """ツール実行完了ごとに出力する中間レポートを生成する。LLM は使用しない。"""
+        """ツール実行完了ごとに出力する中間レポートを生成する。LLM は使用しない。
+        latest_space_change が指定された場合、変更前後の探索空間を記載する。
+        """
         ...
 
     def generate_final(
@@ -438,8 +465,12 @@ class ReportGenerator:
         best_score: float,
         llm: BaseChatModel,
         seed: int | None = None,
+        generated_param_space: ParamSpace | None = None,
+        search_space_change_history: list[SearchSpaceChangeRecord] | None = None,  # 変更があった場合に渡す
     ) -> str:
-        """最適化完了後の最終レポートを生成する。LLM による AI 考察を含む。"""
+        """最適化完了後の最終レポートを生成する。LLM による AI 考察を含む。
+        search_space_change_history が非空の場合、変更履歴セクションを追加する。
+        """
         ...
 ```
 
