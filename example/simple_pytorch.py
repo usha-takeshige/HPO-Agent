@@ -127,8 +127,8 @@ param_space = ParamSpace(
 # 部分指定: パラメータ名と型のみ指定し、範囲は LLM が補完する
 partial_param_space = ParamSpace(
     specs=(
-        ParamSpec(name="hidden_size", type="int"),   # 範囲は LLM が補完
-        ParamSpec(name="dropout", type="float"),      # 範囲は LLM が補完
+        ParamSpec(name="hidden_size", type="int"),  # 範囲は LLM が補完
+        ParamSpec(name="dropout", type="float"),  # 範囲は LLM が補完
     )
 )
 
@@ -175,7 +175,7 @@ def main() -> None:
     agent = HPOAgent(
         model=model_fn,
         eval_fn=eval_fn,
-        n_trials=15,
+        n_trials=5,
         param_space=partial_param_space,  # 名前・型のみ指定 → LLM が範囲を補完
         seed=42,
     )
