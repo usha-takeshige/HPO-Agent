@@ -629,6 +629,188 @@ class TestAutoParamSpaceGeneration:
         )
 
 
+class TestPartialParamSpaceCompletion:
+    def test_complete_param_space_called_when_partial(
+        self, lgbm_binary_setup: Any, mock_param_space_llm: MagicMock
+    ) -> None:
+        """AGT-22: 部分指定 spec が含まれる場合 _complete_param_space() が呼ばれる."""
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import HPOResult, ParamSpace, ParamSpec
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        partial_space = ParamSpace(
+            specs=(ParamSpec(name="n_estimators", type="int"),)
+        )
+        agent = HPOAgent(
+            model=model,
+            eval_fn=eval_fn,
+            n_trials=5,
+            X=X,
+            y=y,
+            param_space=partial_space,
+        )
+
+        with (
+            patch.object(agent, "_complete_param_space") as mock_complete,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            completed = ParamSpace(
+                specs=(ParamSpec(name="n_estimators", type="int", low=50, high=500),)
+            )
+            mock_complete.return_value = completed
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
+            )
+            mock_build.return_value = mock_supervisor
+            agent.run()
+            mock_complete.assert_called_once_with(partial_space)
+
+    def test_complete_param_space_not_called_when_fully_specified(
+        self, lgbm_binary_setup: Any, simple_param_space: Any
+    ) -> None:
+        """AGT-23: 完全指定のみの場合 _complete_param_space() が呼ばれない."""
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import HPOResult
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(
+            model=model,
+            eval_fn=eval_fn,
+            n_trials=5,
+            X=X,
+            y=y,
+            param_space=simple_param_space,
+        )
+
+        with (
+            patch.object(agent, "_complete_param_space") as mock_complete,
+            patch.object(agent, "_generate_param_space") as mock_gen,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
+            )
+            mock_build.return_value = mock_supervisor
+            agent.run()
+            mock_complete.assert_not_called()
+            mock_gen.assert_not_called()
+
+    def test_generate_param_space_not_called_when_partial(
+        self, lgbm_binary_setup: Any
+    ) -> None:
+        """AGT-24: 部分指定の場合 _generate_param_space() は呼ばれない."""
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import HPOResult, ParamSpace, ParamSpec
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        partial_space = ParamSpace(
+            specs=(ParamSpec(name="n_estimators", type="int"),)
+        )
+        agent = HPOAgent(
+            model=model,
+            eval_fn=eval_fn,
+            n_trials=5,
+            X=X,
+            y=y,
+            param_space=partial_space,
+        )
+
+        with (
+            patch.object(agent, "_generate_param_space") as mock_gen,
+            patch.object(agent, "_complete_param_space") as mock_complete,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            completed = ParamSpace(
+                specs=(ParamSpec(name="n_estimators", type="int", low=50, high=500),)
+            )
+            mock_complete.return_value = completed
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
+            )
+            mock_build.return_value = mock_supervisor
+            agent.run()
+            mock_gen.assert_not_called()
+
+    def test_complete_preserves_fully_specified_specs(
+        self, lgbm_binary_setup: Any, mock_param_space_llm: MagicMock
+    ) -> None:
+        """AGT-25: 補完後の ParamSpace に完全指定 spec がそのまま含まれる."""
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import HPOResult, ParamSpace, ParamSpec, ParamSpaceSchema
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        complete_spec = ParamSpec(name="learning_rate", type="float", low=0.01, high=0.3)
+        partial_spec = ParamSpec(name="n_estimators", type="int")
+        mixed_space = ParamSpace(specs=(complete_spec, partial_spec))
+
+        agent = HPOAgent(
+            model=model,
+            eval_fn=eval_fn,
+            n_trials=5,
+            X=X,
+            y=y,
+            param_space=mixed_space,
+        )
+
+        with (
+            patch.object(agent, "_resolve_llm_provider") as mock_provider,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            # LLM が n_estimators の補完結果を返す
+            completed_schema = ParamSpaceSchema(
+                specs=[
+                    __import__("hpo_agent.models", fromlist=["ParamSpecSchema"]).ParamSpecSchema(
+                        name="n_estimators", type="int", low=50, high=500
+                    )
+                ]
+            )
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_llm.invoke.return_value = completed_schema
+            mock_provider.return_value = MagicMock()
+            mock_provider.return_value.get_llm.return_value = mock_llm
+
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
+            )
+            mock_build.return_value = mock_supervisor
+
+            agent.run()
+
+            # _build_supervisor に渡された param_space に完全指定 spec が含まれているか検証
+            call_args = mock_build.call_args
+            result_space: ParamSpace = call_args[0][1]
+            spec_names = [s.name for s in result_space.specs]
+            assert "learning_rate" in spec_names
+            lr_spec = next(s for s in result_space.specs if s.name == "learning_rate")
+            assert lr_spec.low == 0.01
+            assert lr_spec.high == 0.3
+
+
 class TestExpertHistorySelection:
     def test_history_selection_limit(
         self, dummy_adapter: Any, simple_param_space: Any, mock_expert_llm: MagicMock
