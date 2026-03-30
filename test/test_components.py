@@ -201,7 +201,9 @@ class TestParamSpec:
         """is_partial: choices が設定されている categorical 型は完全指定."""
         from hpo_agent.models import ParamSpec
 
-        spec = ParamSpec(name="activation", type="categorical", choices=("relu", "tanh"))
+        spec = ParamSpec(
+            name="activation", type="categorical", choices=("relu", "tanh")
+        )
         assert spec.is_partial is False
 
     def test_log_true_partial_does_not_raise(self) -> None:

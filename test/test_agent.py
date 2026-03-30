@@ -640,9 +640,7 @@ class TestPartialParamSpaceCompletion:
         from hpo_agent.models import HPOResult, ParamSpace, ParamSpec
 
         model, eval_fn, X, y = lgbm_binary_setup
-        partial_space = ParamSpace(
-            specs=(ParamSpec(name="n_estimators", type="int"),)
-        )
+        partial_space = ParamSpace(specs=(ParamSpec(name="n_estimators", type="int"),))
         agent = HPOAgent(
             model=model,
             eval_fn=eval_fn,
@@ -717,9 +715,7 @@ class TestPartialParamSpaceCompletion:
         from hpo_agent.models import HPOResult, ParamSpace, ParamSpec
 
         model, eval_fn, X, y = lgbm_binary_setup
-        partial_space = ParamSpace(
-            specs=(ParamSpec(name="n_estimators", type="int"),)
-        )
+        partial_space = ParamSpace(specs=(ParamSpec(name="n_estimators", type="int"),))
         agent = HPOAgent(
             model=model,
             eval_fn=eval_fn,
@@ -756,10 +752,12 @@ class TestPartialParamSpaceCompletion:
         from unittest.mock import patch
 
         from hpo_agent.agent import HPOAgent
-        from hpo_agent.models import HPOResult, ParamSpace, ParamSpec, ParamSpaceSchema
+        from hpo_agent.models import HPOResult, ParamSpace, ParamSpaceSchema, ParamSpec
 
         model, eval_fn, X, y = lgbm_binary_setup
-        complete_spec = ParamSpec(name="learning_rate", type="float", low=0.01, high=0.3)
+        complete_spec = ParamSpec(
+            name="learning_rate", type="float", low=0.01, high=0.3
+        )
         partial_spec = ParamSpec(name="n_estimators", type="int")
         mixed_space = ParamSpace(specs=(complete_spec, partial_spec))
 
@@ -779,9 +777,9 @@ class TestPartialParamSpaceCompletion:
             # LLM が n_estimators の補完結果を返す
             completed_schema = ParamSpaceSchema(
                 specs=[
-                    __import__("hpo_agent.models", fromlist=["ParamSpecSchema"]).ParamSpecSchema(
-                        name="n_estimators", type="int", low=50, high=500
-                    )
+                    __import__(
+                        "hpo_agent.models", fromlist=["ParamSpecSchema"]
+                    ).ParamSpecSchema(name="n_estimators", type="int", low=50, high=500)
                 ]
             )
             mock_llm = MagicMock()
