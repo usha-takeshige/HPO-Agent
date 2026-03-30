@@ -124,6 +124,14 @@ param_space = ParamSpace(
     )
 )
 
+# 部分指定: パラメータ名と型のみ指定し、範囲は LLM が補完する
+partial_param_space = ParamSpace(
+    specs=(
+        ParamSpec(name="hidden_size", type="int"),  # 範囲は LLM が補完
+        ParamSpec(name="dropout", type="float"),  # 範囲は LLM が補完
+    )
+)
+
 
 # ---------------------------------------------------------------------------
 # メイン
@@ -133,9 +141,13 @@ param_space = ParamSpace(
 def main() -> None:
     """HPO-Agent を使って MLP の hidden_size と dropout を最適化する。
 
-    param_space を明示的に指定する方法と、LLM に自動生成させる方法の両方を示す。
+    param_space を明示的に指定する方法・LLM に自動生成させる方法・
+    パラメータ名のみ指定して LLM に範囲を補完させる方法の3通りを示す。
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("google").setLevel(logging.WARNING)
     print("=== PyTorch MLP HPO-Agent Example ===\n")
 
     # --- 方法1: param_space を明示的に指定する（従来の方法）---
@@ -149,38 +161,49 @@ def main() -> None:
 
     # --- 方法2: param_space を省略して LLM に自動生成させる ---
     # eval_fn のソースコードとモデルクラス名をもとに LLM が探索空間を設計する
+    # agent = HPOAgent(
+    #     model=model_fn,
+    #     eval_fn=eval_fn,
+    #     n_trials=15,
+    #     # param_space を省略 → LLM が自動生成
+    #     seed=42,
+    # )
+
+    # --- 方法3: パラメータ名と型のみ指定して LLM に範囲を補完させる ---
+    # モデル固有のパラメータ名（hidden_size / dropout）を明示することで
+    # LLM が誤った名前を生成するリスクを排除しつつ、範囲設計を LLM に委ねる
     agent = HPOAgent(
         model=model_fn,
         eval_fn=eval_fn,
-        n_trials=15,
-        # param_space を省略 → LLM が自動生成
+        n_trials=5,
+        param_space=partial_param_space,  # 名前・型のみ指定 → LLM が範囲を補完
         seed=42,
     )
 
-    print("最適化を開始します（n_trials=15）...\n")
+    print("Starting optimization (n_trials=15)...\n")
     result = agent.run()
 
-    print("\n=== 最適化結果 ===")
-    print(f"最良スコア（負の MSE）: {result.best_score:.4f}")
-    print(f"最良パラメータ: {result.best_params}\n")
+    print("\n=== Optimization Results ===")
+    print(f"Best score (negative MSE): {result.best_score:.4f}")
+    print(f"Best params: {result.best_params}\n")
 
     # 試行履歴 CSV 出力
     output_dir = pathlib.Path(__file__).parent / "output"
     output_dir.mkdir(exist_ok=True)
     csv_path = output_dir / "pytorch_trials.csv"
     result.trials_df.to_csv(csv_path, index=False, encoding="utf-8")
-    print(f"試行履歴を保存しました: {csv_path}\n")
+    print(f"Trial history saved: {csv_path}\n")
 
-    print("=== 試行履歴（先頭5件）===")
+    print("=== Trial History (first 5) ===")
     print(result.trials_df.head())
 
     # Markdown レポート出力
-    print("\n=== レポート ===")
+    print("\n=== Report ===")
     print(result.report)
     report_path = output_dir / "pytorch_hpo_report.md"
     with open(report_path, "w") as f:
         f.write(result.report)
-    print(f"レポートを保存しました: {report_path}")
+    print(f"Report saved: {report_path}")
 
 
 if __name__ == "__main__":

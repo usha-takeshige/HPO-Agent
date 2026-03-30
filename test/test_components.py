@@ -162,6 +162,57 @@ class TestParamSpec:
         with pytest.raises(FrozenInstanceError):
             spec.name = "x"  # type: ignore[misc]
 
+    def test_is_partial_true_when_low_missing(self) -> None:
+        """is_partial: low が None の数値型は部分指定."""
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(name="lr", type="float", high=1.0)
+        assert spec.is_partial is True
+
+    def test_is_partial_true_when_high_missing(self) -> None:
+        """is_partial: high が None の数値型は部分指定."""
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(name="n_layers", type="int", low=1)
+        assert spec.is_partial is True
+
+    def test_is_partial_true_when_both_bounds_missing(self) -> None:
+        """is_partial: low/high ともに None の数値型は部分指定."""
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(name="n_layers", type="int")
+        assert spec.is_partial is True
+
+    def test_is_partial_true_when_choices_missing_categorical(self) -> None:
+        """is_partial: choices が None の categorical 型は部分指定."""
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(name="activation", type="categorical")
+        assert spec.is_partial is True
+
+    def test_is_partial_false_when_fully_specified_numeric(self) -> None:
+        """is_partial: low/high が揃っている数値型は完全指定."""
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(name="lr", type="float", low=0.001, high=1.0)
+        assert spec.is_partial is False
+
+    def test_is_partial_false_when_fully_specified_categorical(self) -> None:
+        """is_partial: choices が設定されている categorical 型は完全指定."""
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(
+            name="activation", type="categorical", choices=("relu", "tanh")
+        )
+        assert spec.is_partial is False
+
+    def test_log_true_partial_does_not_raise(self) -> None:
+        """log=True かつ部分指定（low=None）の場合はバリデーションエラーが発生しない."""
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(name="lr", type="float", log=True)
+        assert spec.is_partial is True
+
 
 # ---------------------------------------------------------------------------
 # CMP-23: TrialRecord.to_dict
