@@ -285,5 +285,5 @@ class ReportGenerator:
             ai_content = "".join(
                 b.get("text", "") if isinstance(b, dict) else str(b) for b in ai_content
             )
-        ai_section = f"\n\n## AI考察\n\n{ai_content}"
+        ai_section = f"\n\n{ai_content}"
         return full_report + ai_section
