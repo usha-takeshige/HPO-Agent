@@ -110,6 +110,7 @@ class HPOAgent:
         adapter, param_space = self._resolve_adapter()
         generated_param_space: ParamSpace | None = None
         if param_space is None:
+            logger.info("Supervisor agent creates search space.\n")
             param_space = self._generate_param_space()
             generated_param_space = param_space
         supervisor = self._build_supervisor(adapter, param_space, generated_param_space)
@@ -195,7 +196,7 @@ class HPOAgent:
         )
         param_space = result.to_param_space()
         logger.info(
-            "[HPOAgent] LLM が自動生成したパラメータ空間 (model=%s, n_trials=%d):\n%s",
+            "[HPOAgent] Auto-generated parameter space by LLM (model=%s, n_trials=%d):\n%s",
             model_class_name,
             self._config.n_trials,
             "\n".join(self._format_param_space(param_space)),

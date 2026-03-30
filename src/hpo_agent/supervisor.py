@@ -110,7 +110,9 @@ class Supervisor:
         reasoning = _content if isinstance(_content, str) else ""
         if response.tool_calls:
             _tc = response.tool_calls[0]
+            logger.info("Supervisor selecting next tool...\n")
             logger.info(
+                "## Supervisor's Rationale for Tool Selection\n"
                 "Supervisor selected tool '%s' with %d planned trial(s).",
                 _tc["name"],
                 int(_tc.get("args", {}).get("n_trials", 1)),
@@ -157,11 +159,14 @@ class Supervisor:
             requested_trials,
             state.remaining_trials,
         )
+        if state.last_tool_reasoning:
+            logger.info("\n%s\n", state.last_tool_reasoning)
 
         new_records = tool._run(
             n_trials=n_trials,
             trial_history=list(state.trial_records),
             effective_param_space=state.current_param_space,
+            start_trial_id=len(state.trial_records),
         )
 
         # trial_id を既存件数からオフセット
@@ -186,11 +191,10 @@ class Supervisor:
             current_tool_records=new_records,
         )
         logger.info(
-            "Tool '%s' completed (%d trials). Best score: %.6f\n%s",
+            "Tool '%s' completed (%d trials). Best score: %.6f\n",
             tool_name,
             len(new_records),
             best_score,
-            report,
         )
 
         tool_message = ToolMessage(
@@ -248,21 +252,10 @@ class Supervisor:
         updated_history = list(state.search_space_change_history) + [change_record]
 
         description = _describe_param_space(result)
-        logger.info("[change_search_space] 探索空間を更新:\n%s", description)
-
-        best_score, best_params = self._find_best(list(state.trial_records))
-        report = self._report_generator.generate_intermediate(
-            trial_records=list(state.trial_records),
-            best_params=best_params,
-            best_score=best_score,
-            seed=state.config.seed,
-            tool_reasoning=state.last_tool_reasoning,
-            latest_space_change=change_record,
-        )
         logger.info(
-            "[change_search_space] 探索空間を更新しました（試行 %d 件完了後）\n%s",
+            "[change_search_space] Search space updated after %d trial(s).\n%s\n",
             len(state.trial_records),
-            report,
+            description,
         )
 
         return {

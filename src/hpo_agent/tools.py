@@ -98,6 +98,7 @@ class SobolSearchTool(HPOToolBase):
         rng = np.random.default_rng(seed=self.seed)
         algo_duration = time.perf_counter() - algo_start
 
+        best_so_far = max((r.score for r in trial_history), default=float("-inf"))
         records: list[TrialRecord] = []
         for i in range(n_trials):
             params: dict[str, Any] = {}
@@ -123,6 +124,7 @@ class SobolSearchTool(HPOToolBase):
             eval_start = time.perf_counter()
             score = self.adapter.evaluate(params)
             eval_duration = time.perf_counter() - eval_start
+            best_so_far = max(best_so_far, score)
 
             records.append(
                 TrialRecord(
@@ -136,9 +138,10 @@ class SobolSearchTool(HPOToolBase):
                 )
             )
             logger.info(
-                "[sobol_search] trial=%d | score=%.6f | eval=%.2fs | params=%s",
+                "[sobol_search] trial=%d | score=%.6f | best=%.6f | eval=%.2fs | params=%s",
                 i,
                 score,
+                best_so_far,
                 eval_duration,
                 params,
             )
@@ -199,6 +202,7 @@ class BayesianOptimizationTool(HPOToolBase):
             )
             study.add_trial(frozen_trial)
 
+        best_so_far = max((r.score for r in trial_history), default=float("-inf"))
         records: list[TrialRecord] = []
         for i in range(n_trials):
             algo_start = time.perf_counter()
@@ -209,6 +213,7 @@ class BayesianOptimizationTool(HPOToolBase):
             eval_start = time.perf_counter()
             score = self.adapter.evaluate(suggested_params)
             eval_duration = time.perf_counter() - eval_start
+            best_so_far = max(best_so_far, score)
 
             study.tell(trial, score)
 
@@ -224,9 +229,10 @@ class BayesianOptimizationTool(HPOToolBase):
                 )
             )
             logger.info(
-                "[bayesian_optimization] trial=%d | score=%.6f | eval=%.2fs | params=%s",
+                "[bayesian_optimization] trial=%d | score=%.6f | best=%.6f | eval=%.2fs | params=%s",
                 i,
                 score,
+                best_so_far,
                 eval_duration,
                 suggested_params,
             )
@@ -326,11 +332,13 @@ class ExpertAgentTool(HPOToolBase):
         """LLM からパラメータ提案を受け取って評価する。"""
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        start_trial_id: int = kwargs.get("start_trial_id", 0)
         param_space = effective_param_space or self.param_space
         param_space_desc = self._build_param_space_description(param_space)
         # ループ内で更新するため mutable なリストとして保持
         current_history = list(trial_history)
 
+        best_so_far = max((r.score for r in trial_history), default=float("-inf"))
         records: list[TrialRecord] = []
         for i in range(n_trials):
             # 試行ごとに最新の履歴でメッセージを再構築
@@ -379,6 +387,7 @@ class ExpertAgentTool(HPOToolBase):
             score = self.adapter.evaluate(params)
             eval_duration = time.perf_counter() - eval_start
 
+            best_so_far = max(best_so_far, score)
             new_record = TrialRecord(
                 trial_id=i,
                 params=params,
@@ -391,10 +400,14 @@ class ExpertAgentTool(HPOToolBase):
             )
             records.append(new_record)
             current_history.append(new_record)
+            absolute_trial_id = start_trial_id + i
             logger.info(
-                "[expert_agent] trial=%d | score=%.6f | eval=%.2fs | params=%s",
+                "[expert_agent] Trial %d: %s\nresult: trial=%d | score=%.6f | best=%.6f | eval=%.2fs | params=%s",
+                absolute_trial_id,
+                reasoning,
                 i,
                 score,
+                best_so_far,
                 eval_duration,
                 params,
             )
