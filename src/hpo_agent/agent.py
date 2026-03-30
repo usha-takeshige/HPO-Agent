@@ -17,9 +17,10 @@ from hpo_agent.adapters import (
     PyTorchAdapter,
     SklearnAdapter,
 )
-from hpo_agent.models import HPOConfig, HPOResult, ParamSpace
+from hpo_agent.models import HPOConfig, HPOResult, ParamSpace, ParamSpec
 from hpo_agent.prompts import (
     EXPERT_AGENT_DEFAULT_PROMPT,
+    PARAM_SPACE_COMPLETION_PROMPT,
     PARAM_SPACE_GENERATION_PROMPT,
     SUPERVISOR_DEFAULT_PROMPT,
     build_system_prompt,
@@ -113,6 +114,10 @@ class HPOAgent:
             logger.info("Supervisor agent creates search space.\n")
             param_space = self._generate_param_space()
             generated_param_space = param_space
+        elif any(s.is_partial for s in param_space.specs):
+            logger.info("Supervisor agent completes partial search space.\n")
+            param_space = self._complete_param_space(param_space)
+            generated_param_space = param_space
         supervisor = self._build_supervisor(adapter, param_space, generated_param_space)
         return supervisor.run(self._config)
 
@@ -197,6 +202,68 @@ class HPOAgent:
         param_space = result.to_param_space()
         logger.info(
             "[HPOAgent] Auto-generated parameter space by LLM (model=%s, n_trials=%d):\n%s",
+            model_class_name,
+            self._config.n_trials,
+            "\n".join(self._format_param_space(param_space)),
+        )
+        return param_space
+
+    def _complete_param_space(self, partial_space: ParamSpace) -> ParamSpace:
+        """部分指定の ParamSpec を LLM で補完して完全な ParamSpace を返す。
+
+        partial_space に含まれる部分指定 spec（is_partial=True）の範囲・選択肢を
+        LLM に補完させ、完全指定 spec と結合して返す。
+
+        Args:
+            partial_space: 部分指定の ParamSpec を含む ParamSpace。
+
+        Returns:
+            すべての ParamSpec が完全指定された ParamSpace。
+        """
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from hpo_agent.models import ParamSpaceSchema
+
+        partial_specs = [s for s in partial_space.specs if s.is_partial]
+        complete_specs = [s for s in partial_space.specs if not s.is_partial]
+
+        model_class_name = type(self._config.model).__name__
+        try:
+            eval_fn_source = inspect.getsource(self._config.eval_fn)
+        except (OSError, TypeError):
+            eval_fn_source = "(ソース取得不可)"
+
+        partial_specs_description = "\n".join(
+            f"- {s.name}: {s.type}" for s in partial_specs
+        )
+        complete_specs_description = (
+            "\n".join(self._format_param_space(ParamSpace(specs=tuple(complete_specs))))
+            if complete_specs
+            else "(なし)"
+        )
+
+        prompt = PARAM_SPACE_COMPLETION_PROMPT.format(
+            model_class_name=model_class_name,
+            n_trials=self._config.n_trials,
+            eval_fn_source=eval_fn_source,
+            partial_specs_description=partial_specs_description,
+            complete_specs_description=complete_specs_description,
+        )
+
+        llm_provider = self._resolve_llm_provider()
+        llm = llm_provider.get_llm(temperature=0)
+        structured_llm = llm.with_structured_output(ParamSpaceSchema)
+        result: ParamSpaceSchema = structured_llm.invoke(  # type: ignore[assignment]
+            [
+                SystemMessage(content="あなたは機械学習の専門家です。"),
+                HumanMessage(content=prompt),
+            ]
+        )
+        completed_specs: list[ParamSpec] = [s.to_param_spec() for s in result.specs]
+        all_specs = tuple(complete_specs) + tuple(completed_specs)
+        param_space = ParamSpace(specs=all_specs)
+        logger.info(
+            "[HPOAgent] Completed partial param space by LLM (model=%s, n_trials=%d):\n%s",
             model_class_name,
             self._config.n_trials,
             "\n".join(self._format_param_space(param_space)),
