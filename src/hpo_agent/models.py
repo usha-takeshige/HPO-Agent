@@ -36,9 +36,16 @@ class ParamSpec:
     choices: tuple[str | int | float, ...] | None = None
     log: bool = False
 
+    @property
+    def is_partial(self) -> bool:
+        """範囲・選択肢が未指定の部分指定 spec かどうかを返す。"""
+        if self.type == "categorical":
+            return self.choices is None
+        return self.low is None or self.high is None
+
     def __post_init__(self) -> None:
-        """バリデーション: log=True の場合 low > 0 でなければならない."""
-        if self.log and self.type in ("int", "float"):
+        """バリデーション: 完全指定かつ log=True の場合 low > 0 でなければならない."""
+        if self.log and self.type in ("int", "float") and not self.is_partial:
             if self.low is None or self.low <= 0:
                 raise ValueError(
                     f"ParamSpec '{self.name}': log=True の場合 low > 0 が必要です。"
