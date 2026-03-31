@@ -216,10 +216,10 @@ result = agent.run()
 | カラム名 | 型 | 説明 |
 |---|---|---|
 | `trial_id` | `int` | 試行番号 |
-| `params` | `dict` | 試行したパラメーター |
+| `<param_name>` | `int` / `float` / `str` | 試行したパラメーター（各パラメーターが個別カラムとして展開される。例: `num_leaves`, `learning_rate`） |
 | `score` | `float` | `eval_fn` が返したスコア |
 | `tool_used` | `str` | 使用した探索ツール名 |
-| `timestamp` | `datetime` | 実行日時 |
+| `timestamp` | `str` | 実行日時（ISO 8601 形式） |
 | `eval_duration` | `float` | モデルの学習・評価にかかった時間（秒） |
 | `algo_duration` | `float` | アルゴリズムが次の実験点を算出するのにかかった時間（秒） |
 | `reasoning` | `str` | AI の判断理由（ツール選択理由またはパラメーター提案理由） |
@@ -247,20 +247,9 @@ with open("hpo_report.md", "w") as f:
 
 ## パラメーター空間のカスタマイズ
 
-デフォルトでは、LightGBM 用に以下の8パラメーターが探索されます。
+`param_space` を省略した場合、LLM がモデルのクラス名・`eval_fn` のソースコード・試行回数をもとに、適切な探索空間を自動設計します。これは LightGBM / sklearn / PyTorch のすべてのモデル種別で共通の動作です。
 
-| パラメーター | 探索範囲 | スケール |
-|---|---|---|
-| `num_leaves` | 20 〜 300 | 線形 |
-| `max_depth` | 3 〜 12 | 線形 |
-| `learning_rate` | 0.0001 〜 0.3 | 対数 |
-| `n_estimators` | 50 〜 1000 | 線形 |
-| `subsample` | 0.5 〜 1.0 | 線形 |
-| `colsample_bytree` | 0.5 〜 1.0 | 線形 |
-| `reg_alpha` | 1e-8 〜 10.0 | 対数 |
-| `reg_lambda` | 1e-8 〜 10.0 | 対数 |
-
-探索範囲を変更したい場合は、`ParamSpec` と `ParamSpace` を使って手動指定できます。
+探索空間を明示的に指定したい場合は、`ParamSpec` と `ParamSpace` を使って手動指定できます。
 
 ```python
 from hpo_agent import HPOAgent, ParamSpec, ParamSpace
