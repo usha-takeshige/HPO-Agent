@@ -6,6 +6,7 @@ import inspect
 import logging
 import os
 from collections.abc import Callable
+from dataclasses import replace as dataclass_replace
 from typing import Any
 
 from dotenv import load_dotenv
@@ -234,7 +235,7 @@ class HPOAgent:
             eval_fn_source = "(ソース取得不可)"
 
         partial_specs_description = "\n".join(
-            f"- {s.name}: {s.type}" for s in partial_specs
+            self._format_partial_spec_line(s) for s in partial_specs
         )
         complete_specs_description = (
             "\n".join(self._format_param_space(ParamSpace(specs=tuple(complete_specs))))
@@ -259,7 +260,17 @@ class HPOAgent:
                 HumanMessage(content=prompt),
             ]
         )
-        completed_specs: list[ParamSpec] = [s.to_param_spec() for s in result.specs]
+        original_partial_map: dict[str, ParamSpec] = {s.name: s for s in partial_specs}
+        completed_specs: list[ParamSpec] = [
+            (
+                self._enforce_user_bounds(
+                    s.to_param_spec(), original_partial_map[s.name]
+                )
+                if s.name in original_partial_map
+                else s.to_param_spec()
+            )
+            for s in result.specs
+        ]
         all_specs = tuple(complete_specs) + tuple(completed_specs)
         param_space = ParamSpace(specs=all_specs)
         logger.info(
@@ -285,6 +296,34 @@ class HPOAgent:
                     f" [{spec.low}, {spec.high}], {scale}"
                 )
         return lines
+
+    @staticmethod
+    def _format_partial_spec_line(spec: ParamSpec) -> str:
+        """部分指定 ParamSpec を LLM への説明行に変換する。
+
+        ユーザーが指定済みの low / high は「ユーザー指定・変更不可」と明示する。
+        """
+        parts = [f"- {spec.name}: {spec.type}"]
+        if spec.low is not None:
+            parts.append(f"low={spec.low} (ユーザー指定・変更不可)")
+        if spec.high is not None:
+            parts.append(f"high={spec.high} (ユーザー指定・変更不可)")
+        return ", ".join(parts)
+
+    @staticmethod
+    def _enforce_user_bounds(llm_spec: ParamSpec, original: ParamSpec) -> ParamSpec:
+        """LLM が返した spec にユーザー指定の low / high を上書きして返す。
+
+        Args:
+            llm_spec: LLM が補完した ParamSpec。
+            original: ユーザーが指定した部分指定 ParamSpec。
+
+        Returns:
+            ユーザー指定の bound を優先した ParamSpec。
+        """
+        low = original.low if original.low is not None else llm_spec.low
+        high = original.high if original.high is not None else llm_spec.high
+        return dataclass_replace(llm_spec, low=low, high=high)
 
     def _resolve_llm_provider(self) -> LLMProviderBase:
         """環境変数から LLM プロバイダーを構築して返す。
