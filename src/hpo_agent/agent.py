@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+from dataclasses import replace as dataclass_replace
 import os
 from collections.abc import Callable
 from typing import Any
@@ -259,7 +260,13 @@ class HPOAgent:
                 HumanMessage(content=prompt),
             ]
         )
-        completed_specs: list[ParamSpec] = [s.to_param_spec() for s in result.specs]
+        original_partial_map: dict[str, ParamSpec] = {s.name: s for s in partial_specs}
+        completed_specs: list[ParamSpec] = [
+            self._enforce_user_bounds(s.to_param_spec(), original_partial_map[s.name])
+            if s.name in original_partial_map
+            else s.to_param_spec()
+            for s in result.specs
+        ]
         all_specs = tuple(complete_specs) + tuple(completed_specs)
         param_space = ParamSpace(specs=all_specs)
         logger.info(
@@ -298,6 +305,21 @@ class HPOAgent:
         if spec.high is not None:
             parts.append(f"high={spec.high} (ユーザー指定・変更不可)")
         return ", ".join(parts)
+
+    @staticmethod
+    def _enforce_user_bounds(llm_spec: ParamSpec, original: ParamSpec) -> ParamSpec:
+        """LLM が返した spec にユーザー指定の low / high を上書きして返す。
+
+        Args:
+            llm_spec: LLM が補完した ParamSpec。
+            original: ユーザーが指定した部分指定 ParamSpec。
+
+        Returns:
+            ユーザー指定の bound を優先した ParamSpec。
+        """
+        low = original.low if original.low is not None else llm_spec.low
+        high = original.high if original.high is not None else llm_spec.high
+        return dataclass_replace(llm_spec, low=low, high=high)
 
     def _resolve_llm_provider(self) -> LLMProviderBase:
         """環境変数から LLM プロバイダーを構築して返す。
