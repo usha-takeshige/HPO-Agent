@@ -91,10 +91,10 @@ class ModelAdapterBase(ABC):
 HPOConfig.param_space が指定されている
     → ユーザー指定の ParamSpace を使用（アダプターのデフォルトは無視）
 HPOConfig.param_space が None（未指定）
-    → ModelAdapterBase.get_default_param_space() の返り値を使用
+    → HPOAgent._generate_param_space() で LLM が自動生成した ParamSpace を使用
 ```
 
-この解決は `HPOAgent._resolve_adapter()` で行い、決定した `ParamSpace` をツールに渡す。
+`_resolve_adapter()` は `(adapter, param_space)` のタプルを返す。`param_space` が `None`（未指定）の場合、呼び出し元の `HPOAgent.run()` が `_generate_param_space()` を呼び出して LLM に空間を生成させる。全モデル種別（LightGBM / sklearn / PyTorch）で統一の方針であり、アダプターのデフォルト空間（`get_default_param_space()`）は使用しない。
 
 #### `evaluate()` の契約
 
@@ -130,18 +130,9 @@ class LightGBMAdapter(ModelAdapterBase):
 
 ### 4-2. デフォルトパラメータ空間
 
-MVP では以下の8パラメータをデフォルト空間として定義する。
+`LightGBMAdapter.get_default_param_space()` は `NotImplementedError` を送出する。`param_space` 未指定時は `HPOAgent._generate_param_space()` が LLM を使って自動生成する（全モデル統一の方針）。
 
-| パラメータ名 | type | low | high | log | 説明 |
-|------------|------|-----|------|-----|------|
-| `num_leaves` | `int` | 20 | 300 | False | 葉の最大数。過学習の主要な制御パラメータ |
-| `max_depth` | `int` | 3 | 12 | False | 木の最大深さ（-1 で無制限だが MVP では範囲指定） |
-| `learning_rate` | `float` | 1e-4 | 0.3 | True | 学習率。対数スケールで広い範囲を探索 |
-| `n_estimators` | `int` | 50 | 1000 | False | ブースティングの反復回数 |
-| `subsample` | `float` | 0.5 | 1.0 | False | 行サンプリング率 |
-| `colsample_bytree` | `float` | 0.5 | 1.0 | False | 列サンプリング率 |
-| `reg_alpha` | `float` | 1e-8 | 10.0 | True | L1 正則化係数 |
-| `reg_lambda` | `float` | 1e-8 | 10.0 | True | L2 正則化係数 |
+ハードコードされたデフォルト空間は廃止した。モデルの特性・試行回数・`eval_fn` の内容を LLM に渡すことで、ユースケースに応じた適切な探索空間が生成される。
 
 ---
 

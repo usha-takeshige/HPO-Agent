@@ -500,8 +500,8 @@ class Supervisor:
 
     def run(self, config: HPOConfig) -> HPOResult: ...
     def _build_graph(self) -> CompiledGraph: ...
-    def _report_progress(self, state: SupervisorState) -> SupervisorState:
-        """中間レポートを生成してコンソール出力し、state.current_report を更新する。"""
+    def _tool_executor_node(self, state: SupervisorState) -> dict[str, Any]:
+        """選択されたツールを実行して試行結果を状態に追加する。中間レポート生成も担う。"""
         ...
 ```
 
@@ -575,13 +575,11 @@ sequenceDiagram
         HPOToolBase->>ModelAdapterBase: evaluate(params)
         ModelAdapterBase-->>HPOToolBase: score: float
         HPOToolBase-->>LangGraph: list[TrialRecord]
-        LangGraph->>LangGraph: SupervisorState を更新（trial_records, remaining_trials）
-        LangGraph->>Supervisor: _report_progress(state)
-        Supervisor->>ReportGenerator: generate_intermediate(trial_records, best_params, best_score)
-        ReportGenerator-->>Supervisor: intermediate_report: str
-        Supervisor->>Supervisor: logging.INFO(intermediate_report)
-        Note over Supervisor,User: 中間レポートをコンソールに出力
-        Supervisor-->>LangGraph: state（current_report 更新済み）
+        LangGraph->>LangGraph: _tool_executor_node() が SupervisorState を更新（trial_records, remaining_trials）
+        LangGraph->>ReportGenerator: generate_intermediate(trial_records, best_params, best_score)
+        ReportGenerator-->>LangGraph: intermediate_report: str
+        LangGraph->>LangGraph: logging.INFO(intermediate_report)
+        Note over LangGraph,User: 中間レポートをコンソールに出力（current_report を更新）
     end
 
     LangGraph-->>Supervisor: 最終 SupervisorState
@@ -629,8 +627,7 @@ Supervisor.run(config)
     ├── [ループ] HPOToolBase._run() → list[TrialRecord]
     │       │   ModelAdapterBase.evaluate() → float
     │       │
-    │       └── Supervisor._report_progress()
-    │               ReportGenerator.generate_intermediate() → str
+    │       └── _tool_executor_node() 内で ReportGenerator.generate_intermediate() を呼び出す
     │               logging.INFO(intermediate_report)  ─→ [コンソール出力（ユーザーが確認可能）]
     │
     └── [ループ終了後] ReportGenerator.generate_final(llm) → str
@@ -699,7 +696,8 @@ classDiagram
         -system_prompt: str
         +run(config: HPOConfig) HPOResult
         -_build_graph() CompiledGraph
-        -_report_progress(state: SupervisorState) SupervisorState
+        -_supervisor_node(state: SupervisorState) dict
+        -_tool_executor_node(state: SupervisorState) dict
     }
 
     class SupervisorState {
@@ -891,7 +889,7 @@ classDiagram
 | LightGBM パラメータ空間 | LightGBM のデフォルト空間は廃止。`param_space` 未指定時は LLM が自動生成する（全モデル統一の方針） | `HPOAgent._generate_param_space()` |
 | 同期実行の保証 | `HPOAgent.run()` は同期ブロッキングとする。LangGraph の非同期 API は使用しない（将来拡張への考慮のみ） | `HPOAgent.run()` |
 | ログ出力 | 各試行の実行後に試行番号・スコア・評価時間・パラメータを `logging.INFO` で出力する。ツール完了時にはツール名・試行数・最良スコア・中間レポートを `logging.INFO` で出力する | `HPOToolBase._run()`, `Supervisor._tool_executor_node()` |
-| 中間レポートの出力タイミング | ツール実行が完了し `SupervisorState` が更新されたタイミングで `_report_progress()` を呼び出す。LLM を使用しないため低コスト | `Supervisor._report_progress()` |
+| 中間レポートの出力タイミング | ツール実行が完了し `SupervisorState` が更新されたタイミングで `_tool_executor_node()` 内から `ReportGenerator.generate_intermediate()` を直接呼び出す。LLM を使用しないため低コスト | `Supervisor._tool_executor_node()` |
 | 中間レポートと最終レポートの違い | 中間レポートは現時点の統計サマリーのみ（LLM なし）。最終レポートのみ AI による考察・推薦コメントを含む（LLM あり） | `ReportGenerator.generate_intermediate()` / `generate_final()` |
 | モデルのディープコピー | 複数試行で同一モデルオブジェクトを汚染しないよう、評価前に `copy.deepcopy(model)` を行う | `ModelAdapterBase.evaluate()` |
 | 時間計測の方法 | `time.perf_counter()` を使用して `algo_duration`（アルゴリズムの提案計算時間）と `eval_duration`（モデル評価時間）を別々に計測し、`TrialRecord` に記録する。`datetime.now()` は壁時計時刻（`timestamp` 用）、`time.perf_counter()` は高精度な経過時間計測に使用する | `HPOToolBase._run()`, `ModelAdapterBase.evaluate()` |
