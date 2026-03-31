@@ -1168,4 +1168,3 @@ class TestFormatPartialSpecLine:
         assert "high=300" in line
         assert "ユーザー指定・変更不可" in line
         assert "low" not in line
-

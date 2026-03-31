@@ -815,11 +815,18 @@ class TestPartialParamSpaceCompletion:
         from unittest.mock import patch
 
         from hpo_agent.agent import HPOAgent
-        from hpo_agent.models import HPOResult, ParamSpace, ParamSpaceSchema, ParamSpec
-        from hpo_agent.models import ParamSpecSchema
+        from hpo_agent.models import (
+            HPOResult,
+            ParamSpace,
+            ParamSpaceSchema,
+            ParamSpec,
+            ParamSpecSchema,
+        )
 
         model, eval_fn, X, y = lgbm_binary_setup
-        partial_spec = ParamSpec(name="learning_rate", type="float", low=0.001, log=True)
+        partial_spec = ParamSpec(
+            name="learning_rate", type="float", low=0.001, log=True
+        )
         partial_space = ParamSpace(specs=(partial_spec,))
 
         agent = HPOAgent(
@@ -868,7 +875,7 @@ class TestPartialParamSpaceCompletion:
             result_space: ParamSpace = call_args[0][1]
             lr_spec = next(s for s in result_space.specs if s.name == "learning_rate")
             assert lr_spec.low == 0.001  # ユーザー指定値が保持される
-            assert lr_spec.high == 0.5   # LLM が補完した値
+            assert lr_spec.high == 0.5  # LLM が補完した値
 
     def test_complete_preserves_user_specified_high(
         self, lgbm_binary_setup: Any
@@ -877,8 +884,13 @@ class TestPartialParamSpaceCompletion:
         from unittest.mock import patch
 
         from hpo_agent.agent import HPOAgent
-        from hpo_agent.models import HPOResult, ParamSpace, ParamSpaceSchema, ParamSpec
-        from hpo_agent.models import ParamSpecSchema
+        from hpo_agent.models import (
+            HPOResult,
+            ParamSpace,
+            ParamSpaceSchema,
+            ParamSpec,
+            ParamSpecSchema,
+        )
 
         model, eval_fn, X, y = lgbm_binary_setup
         partial_spec = ParamSpec(name="num_leaves", type="int", high=300)
@@ -929,7 +941,7 @@ class TestPartialParamSpaceCompletion:
             result_space: ParamSpace = call_args[0][1]
             nl_spec = next(s for s in result_space.specs if s.name == "num_leaves")
             assert nl_spec.high == 300  # ユーザー指定値が保持される
-            assert nl_spec.low == 10    # LLM が補完した値
+            assert nl_spec.low == 10  # LLM が補完した値
 
     def test_complete_both_bounds_missing_uses_llm_values(
         self, lgbm_binary_setup: Any
@@ -938,8 +950,13 @@ class TestPartialParamSpaceCompletion:
         from unittest.mock import patch
 
         from hpo_agent.agent import HPOAgent
-        from hpo_agent.models import HPOResult, ParamSpace, ParamSpaceSchema, ParamSpec
-        from hpo_agent.models import ParamSpecSchema
+        from hpo_agent.models import (
+            HPOResult,
+            ParamSpace,
+            ParamSpaceSchema,
+            ParamSpec,
+            ParamSpecSchema,
+        )
 
         model, eval_fn, X, y = lgbm_binary_setup
         partial_spec = ParamSpec(name="dropout", type="float")

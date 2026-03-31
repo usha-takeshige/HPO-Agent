@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import inspect
 import logging
-from dataclasses import replace as dataclass_replace
 import os
 from collections.abc import Callable
+from dataclasses import replace as dataclass_replace
 from typing import Any
 
 from dotenv import load_dotenv
@@ -262,9 +262,13 @@ class HPOAgent:
         )
         original_partial_map: dict[str, ParamSpec] = {s.name: s for s in partial_specs}
         completed_specs: list[ParamSpec] = [
-            self._enforce_user_bounds(s.to_param_spec(), original_partial_map[s.name])
-            if s.name in original_partial_map
-            else s.to_param_spec()
+            (
+                self._enforce_user_bounds(
+                    s.to_param_spec(), original_partial_map[s.name]
+                )
+                if s.name in original_partial_map
+                else s.to_param_spec()
+            )
             for s in result.specs
         ]
         all_specs = tuple(complete_specs) + tuple(completed_specs)
