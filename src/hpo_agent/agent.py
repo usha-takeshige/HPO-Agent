@@ -234,7 +234,7 @@ class HPOAgent:
             eval_fn_source = "(ソース取得不可)"
 
         partial_specs_description = "\n".join(
-            f"- {s.name}: {s.type}" for s in partial_specs
+            self._format_partial_spec_line(s) for s in partial_specs
         )
         complete_specs_description = (
             "\n".join(self._format_param_space(ParamSpace(specs=tuple(complete_specs))))
@@ -285,6 +285,19 @@ class HPOAgent:
                     f" [{spec.low}, {spec.high}], {scale}"
                 )
         return lines
+
+    @staticmethod
+    def _format_partial_spec_line(spec: ParamSpec) -> str:
+        """部分指定 ParamSpec を LLM への説明行に変換する。
+
+        ユーザーが指定済みの low / high は「ユーザー指定・変更不可」と明示する。
+        """
+        parts = [f"- {spec.name}: {spec.type}"]
+        if spec.low is not None:
+            parts.append(f"low={spec.low} (ユーザー指定・変更不可)")
+        if spec.high is not None:
+            parts.append(f"high={spec.high} (ユーザー指定・変更不可)")
+        return ", ".join(parts)
 
     def _resolve_llm_provider(self) -> LLMProviderBase:
         """環境変数から LLM プロバイダーを構築して返す。
