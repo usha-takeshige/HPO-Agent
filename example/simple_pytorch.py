@@ -127,8 +127,8 @@ param_space = ParamSpace(
 # 部分指定: パラメータ名と型のみ指定し、範囲は LLM が補完する
 partial_param_space = ParamSpace(
     specs=(
-        ParamSpec(name="hidden_size", type="int"),  # 範囲は LLM が補完
-        ParamSpec(name="dropout", type="float"),  # 範囲は LLM が補完
+        ParamSpec(name="hidden_size", type="int", high=256),  # 範囲は LLM が補完
+        ParamSpec(name="dropout", type="float", low=0.0),  # 範囲は LLM が補完
     )
 )
 
@@ -180,7 +180,7 @@ def main() -> None:
         seed=42,
     )
 
-    print("Starting optimization (n_trials=15)...\n")
+    print("Starting optimization (n_trials=5)...\n")
     result = agent.run()
 
     print("\n=== Optimization Results ===")
