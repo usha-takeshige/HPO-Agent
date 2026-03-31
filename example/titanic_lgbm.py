@@ -131,10 +131,11 @@ def main() -> None:
     print(f"バリデーション精度: {val_acc:.4f}\n")
 
     # 試行履歴 CSV 出力
-    csv_path = pathlib.Path(__file__).parent / "output" / "lgb_trials.csv"
+    output_dir = pathlib.Path(__file__).parent / "output"
+    output_dir.mkdir(exist_ok=True)
+    csv_path = output_dir / "lgb_trials.csv"
     output_df = result.trials_df.copy()
-    if "score" in output_df.columns:
-        output_df["acc"] = output_df["score"]
+    output_df["acc"] = output_df["score"]
     output_df.to_csv(csv_path, index=False, encoding="utf-8")
     print(f"試行履歴を保存しました: {csv_path}\n")
 
@@ -145,7 +146,7 @@ def main() -> None:
     # Markdown レポート
     print("\n=== レポート ===")
     print(result.report)
-    with open(pathlib.Path(__file__).parent / "output" / "lgb_hpo_report.md", "w") as f:
+    with open(output_dir / "lgb_hpo_report.md", "w") as f:
         f.write(result.report)
 
 
