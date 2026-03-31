@@ -1129,3 +1129,43 @@ class TestChangeSearchSpaceTool:
         # すべての試行が拡大後の範囲内に収まっていることを確認
         for r in results:
             assert 20 <= r.params["num_leaves"] <= 500
+
+
+# ---------------------------------------------------------------------------
+# HPOAgent._format_partial_spec_line
+# ---------------------------------------------------------------------------
+
+
+class TestFormatPartialSpecLine:
+    def test_no_bounds_specified(self) -> None:
+        """low/high ともに未指定の場合、名前と型だけが出力される."""
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(name="dropout", type="float")
+        line = HPOAgent._format_partial_spec_line(spec)
+        assert line == "- dropout: float"
+        assert "ユーザー指定" not in line
+
+    def test_low_only_specified(self) -> None:
+        """low のみ指定の場合、low の値と変更不可ラベルが含まれ、high は含まれない."""
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(name="learning_rate", type="float", low=0.001)
+        line = HPOAgent._format_partial_spec_line(spec)
+        assert "low=0.001" in line
+        assert "ユーザー指定・変更不可" in line
+        assert "high" not in line
+
+    def test_high_only_specified(self) -> None:
+        """high のみ指定の場合、high の値と変更不可ラベルが含まれ、low は含まれない."""
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import ParamSpec
+
+        spec = ParamSpec(name="num_leaves", type="int", high=300)
+        line = HPOAgent._format_partial_spec_line(spec)
+        assert "high=300" in line
+        assert "ユーザー指定・変更不可" in line
+        assert "low" not in line
+

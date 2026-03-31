@@ -808,6 +808,189 @@ class TestPartialParamSpaceCompletion:
             assert lr_spec.low == 0.01
             assert lr_spec.high == 0.3
 
+    def test_complete_preserves_user_specified_low(
+        self, lgbm_binary_setup: Any
+    ) -> None:
+        """AGT-26: low のみ指定した部分指定 spec の low が補完後も保持される."""
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import HPOResult, ParamSpace, ParamSpaceSchema, ParamSpec
+        from hpo_agent.models import ParamSpecSchema
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        partial_spec = ParamSpec(name="learning_rate", type="float", low=0.001, log=True)
+        partial_space = ParamSpace(specs=(partial_spec,))
+
+        agent = HPOAgent(
+            model=model,
+            eval_fn=eval_fn,
+            n_trials=5,
+            X=X,
+            y=y,
+            param_space=partial_space,
+        )
+
+        with (
+            patch.object(agent, "_resolve_llm_provider") as mock_provider,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            # LLM がユーザー指定の low=0.001 を無視して low=0.01 を返す（誤った動作）
+            llm_schema = ParamSpaceSchema(
+                specs=[
+                    ParamSpecSchema(
+                        name="learning_rate",
+                        type="float",
+                        low=0.01,
+                        high=0.5,
+                        log=True,
+                    )
+                ]
+            )
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_llm.invoke.return_value = llm_schema
+            mock_provider.return_value = MagicMock()
+            mock_provider.return_value.get_llm.return_value = mock_llm
+
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
+            )
+            mock_build.return_value = mock_supervisor
+
+            agent.run()
+
+            call_args = mock_build.call_args
+            result_space: ParamSpace = call_args[0][1]
+            lr_spec = next(s for s in result_space.specs if s.name == "learning_rate")
+            assert lr_spec.low == 0.001  # ユーザー指定値が保持される
+            assert lr_spec.high == 0.5   # LLM が補完した値
+
+    def test_complete_preserves_user_specified_high(
+        self, lgbm_binary_setup: Any
+    ) -> None:
+        """AGT-27: high のみ指定した部分指定 spec の high が補完後も保持される."""
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import HPOResult, ParamSpace, ParamSpaceSchema, ParamSpec
+        from hpo_agent.models import ParamSpecSchema
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        partial_spec = ParamSpec(name="num_leaves", type="int", high=300)
+        partial_space = ParamSpace(specs=(partial_spec,))
+
+        agent = HPOAgent(
+            model=model,
+            eval_fn=eval_fn,
+            n_trials=5,
+            X=X,
+            y=y,
+            param_space=partial_space,
+        )
+
+        with (
+            patch.object(agent, "_resolve_llm_provider") as mock_provider,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            # LLM がユーザー指定の high=300 を無視して high=500 を返す（誤った動作）
+            llm_schema = ParamSpaceSchema(
+                specs=[
+                    ParamSpecSchema(
+                        name="num_leaves",
+                        type="int",
+                        low=10,
+                        high=500,
+                    )
+                ]
+            )
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_llm.invoke.return_value = llm_schema
+            mock_provider.return_value = MagicMock()
+            mock_provider.return_value.get_llm.return_value = mock_llm
+
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
+            )
+            mock_build.return_value = mock_supervisor
+
+            agent.run()
+
+            call_args = mock_build.call_args
+            result_space: ParamSpace = call_args[0][1]
+            nl_spec = next(s for s in result_space.specs if s.name == "num_leaves")
+            assert nl_spec.high == 300  # ユーザー指定値が保持される
+            assert nl_spec.low == 10    # LLM が補完した値
+
+    def test_complete_both_bounds_missing_uses_llm_values(
+        self, lgbm_binary_setup: Any
+    ) -> None:
+        """AGT-28: low/high ともに未指定の場合、LLM が両方を補完する."""
+        from unittest.mock import patch
+
+        from hpo_agent.agent import HPOAgent
+        from hpo_agent.models import HPOResult, ParamSpace, ParamSpaceSchema, ParamSpec
+        from hpo_agent.models import ParamSpecSchema
+
+        model, eval_fn, X, y = lgbm_binary_setup
+        partial_spec = ParamSpec(name="dropout", type="float")
+        partial_space = ParamSpace(specs=(partial_spec,))
+
+        agent = HPOAgent(
+            model=model,
+            eval_fn=eval_fn,
+            n_trials=5,
+            X=X,
+            y=y,
+            param_space=partial_space,
+        )
+
+        with (
+            patch.object(agent, "_resolve_llm_provider") as mock_provider,
+            patch.object(agent, "_build_supervisor") as mock_build,
+        ):
+            llm_schema = ParamSpaceSchema(
+                specs=[
+                    ParamSpecSchema(
+                        name="dropout",
+                        type="float",
+                        low=0.0,
+                        high=0.5,
+                    )
+                ]
+            )
+            mock_llm = MagicMock()
+            mock_llm.with_structured_output.return_value = mock_llm
+            mock_llm.invoke.return_value = llm_schema
+            mock_provider.return_value = MagicMock()
+            mock_provider.return_value.get_llm.return_value = mock_llm
+
+            mock_supervisor = MagicMock()
+            mock_supervisor.run.return_value = HPOResult(
+                best_params={},
+                best_score=0.0,
+                trials_df=__import__("pandas").DataFrame(),
+                report="",
+            )
+            mock_build.return_value = mock_supervisor
+
+            agent.run()
+
+            call_args = mock_build.call_args
+            result_space: ParamSpace = call_args[0][1]
+            dropout_spec = next(s for s in result_space.specs if s.name == "dropout")
+            assert dropout_spec.low == 0.0
+            assert dropout_spec.high == 0.5
+
 
 class TestExpertHistorySelection:
     def test_history_selection_limit(
