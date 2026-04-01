@@ -64,26 +64,22 @@ from hpo_agent import HPOAgent
 X, y = load_breast_cancer(return_X_y=True, as_frame=True)
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# 2. チューニング対象のモデルを用意
-model = lgb.LGBMClassifier(verbosity=-1)
+# 2. 評価関数を定義（パラメーター辞書を受け取りスコアを返す。大きいほど良い）
+#    X_train / y_train はクロージャでキャプチャする
+def eval_fn(params: dict) -> float:
+    model = lgb.LGBMClassifier(verbosity=-1, **params)
+    model.fit(X_train, y_train)
+    return float(accuracy_score(y_val, model.predict(X_val)))
 
-# 3. 評価関数を定義（スコアを返す。大きいほど良い）
-#    eval_fn には学習済みモデルと X, y が渡される
-def my_eval(model, X, y) -> float:
-    return float(accuracy_score(y, model.predict(X)))
-
-# 4. HPOAgent を作成して実行
+# 3. HPOAgent を作成して実行
 agent = HPOAgent(
-    model=model,
-    eval_fn=my_eval,
+    eval_fn=eval_fn,
     n_trials=50,
-    X=X_train,
-    y=y_train,
 )
 
 result = agent.run()
 
-# 5. 結果を確認
+# 4. 結果を確認
 print(result.best_params)   # 最良パラメーター辞書
 print(result.best_score)    # 最良スコア
 print(result.trials_df)     # 全試行の履歴（pandas DataFrame）
@@ -91,20 +87,21 @@ print(result.report)        # Markdown 形式のレポート
 ```
 
 > **注意**
-> `eval_fn` には、指定したパラメーターで学習済みのモデルと、`HPOAgent` に渡した `X`・`y` が渡されます。
+> `eval_fn` はパラメーター辞書 `params: dict` を受け取り、スコア（`float`）を返す関数です。
 > 「大きいほど良い」スコアを返す設計のため、RMSE や Log Loss など損失関数を使う場合は符号を反転してください。
 > ```python
-> def my_eval(model, X, y) -> float:
->     from sklearn.metrics import mean_squared_error
->     rmse = mean_squared_error(y, model.predict(X), squared=False)
+> def eval_fn(params: dict) -> float:
+>     from sklearn.metrics import root_mean_squared_error
+>     model = lgb.LGBMRegressor(**params).fit(X_train, y_train)
+>     rmse = root_mean_squared_error(y_val, model.predict(X_val))
 >     return -rmse  # 符号反転して「大きいほど良い」に変換
 > ```
 >
-> クロスバリデーションを使いたい場合は、`eval_fn` 内で `copy.deepcopy(model)` して再学習することも可能です（[s5e4_lgbm.py](example/s5e4_lgbm.py) を参照）。
+> クロスバリデーションを使いたい場合は、`eval_fn` 内でループを実装します（[s5e4_lgbm.py](example/s5e4_lgbm.py) を参照）。
 
 ### PyTorch
 
-PyTorch モデルは `fit`/`predict` を持たないため、`model_fn`（モデルファクトリ）と `eval_fn`（学習・評価ループ全体）を渡す設計です。
+PyTorch モデルは `fit`/`predict` を持たないため、`eval_fn` の中でモデルの構築・学習・評価をすべて行います。
 
 ```python
 import torch
@@ -112,26 +109,30 @@ import torch.nn as nn
 import torch.optim as optim
 from hpo_agent import HPOAgent, ParamSpace, ParamSpec
 
-# 1. モデルファクトリを定義（パラメータ辞書を受け取りモデルを返す）
-def model_fn(params):
-    return nn.Sequential(
+# X_train, y_train, X_val, y_val は事前に用意しておく
+
+# 1. 評価関数を定義（モデル構築・学習・評価ループ全体を含む）
+def eval_fn(params: dict) -> float:
+    model = nn.Sequential(
         nn.Linear(10, int(params["hidden_size"])),
         nn.ReLU(),
         nn.Linear(int(params["hidden_size"]), 1),
     )
-
-# 2. 評価関数を定義（学習・評価ループ全体を含む。大きいほど良いスコア）
-def eval_fn(model) -> float:
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.MSELoss()
-    # ... 学習ループ ...
+    model.train()
+    for _ in range(50):
+        optimizer.zero_grad()
+        loss = loss_fn(model(X_train).squeeze(1), y_train)
+        loss.backward()
+        optimizer.step()
+    model.eval()
     with torch.no_grad():
-        val_loss = loss_fn(model(X_val), y_val).item()
+        val_loss = loss_fn(model(X_val).squeeze(1), y_val).item()
     return -val_loss  # 損失を符号反転してスコアに変換
 
-# 3. HPOAgent を作成して実行（param_space 省略時は LLM が自動生成）
+# 2. HPOAgent を作成して実行（param_space 省略時は LLM が自動生成）
 agent = HPOAgent(
-    model=model_fn,        # ファクトリ関数を渡す
     eval_fn=eval_fn,
     n_trials=20,
     # param_space を省略すると LLM が eval_fn のソースコードを読んで自動設計する
@@ -142,10 +143,9 @@ print(result.best_params)
 ```
 
 > **PyTorch の注意点**
-> - `model` 引数にはモデルインスタンスではなく **ファクトリ関数** を渡します
-> - `eval_fn` のシグネチャは `(model) -> float`（`X`, `y` なし）
-> - `param_space` は省略可能です。省略した場合は LLM がモデル情報をもとに探索空間を自動設計します
-> - `X`, `y` は `eval_fn` 内でキャプチャする設計のため、`HPOAgent` への引数は不要です
+> - `eval_fn` のシグネチャは `(params: dict) -> float`。モデルの構築から評価まで `eval_fn` 内に実装します
+> - `X_train` / `y_train` など学習データは `eval_fn` のクロージャでキャプチャします
+> - `param_space` は省略可能です。省略した場合は LLM が `eval_fn` のソースコードをもとに探索空間を自動設計します
 
 ---
 
@@ -170,11 +170,8 @@ print(result.best_params)
 
 ```python
 agent = HPOAgent(
-    model=model,           # 必須
-    eval_fn=my_eval,       # 必須
+    eval_fn=eval_fn,       # 必須
     n_trials=50,           # 必須
-    X=X_train,             # LightGBM では必須、PyTorch では不要
-    y=y_train,             # LightGBM では必須、PyTorch では不要
     param_space=None,      # 任意（省略時は LLM が自動生成）
     seed=42,               # 任意
     prompts={},            # 任意
@@ -184,12 +181,9 @@ agent = HPOAgent(
 
 | パラメーター | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `model` | `Any` | Yes | チューニング対象モデル。LightGBM: `lgb.LGBMModel` のインスタンス。PyTorch: `(params: dict) -> model` のファクトリ関数 |
-| `eval_fn` | `Callable` | Yes | 評価関数（大きいほど良いスコアを返す）。LightGBM: `(model, X, y) -> float`。PyTorch: `(model) -> float`（学習・評価ループ全体） |
+| `eval_fn` | `Callable[[dict], float]` | Yes | 評価関数。`params: dict` を受け取り、スコア（大きいほど良い）を返す。モデルの学習・評価・データの受け渡しはすべてこの関数内で行う |
 | `n_trials` | `int` | Yes | HPO の総試行回数 |
-| `X` | `Any` | LightGBM のみ | 特徴量データ（LightGBM 使用時は必須。PyTorch では不要） |
-| `y` | `Any` | LightGBM のみ | ターゲットデータ（LightGBM 使用時は必須。PyTorch では不要） |
-| `param_space` | `ParamSpace` | No | 探索するパラメーター空間。省略時は LLM がモデル情報（クラス名・`eval_fn` ソースコード・試行回数）をもとに自動設計する |
+| `param_space` | `ParamSpace` | No | 探索するパラメーター空間。省略時は LLM が `eval_fn` のソースコード・試行回数をもとに自動設計する |
 | `seed` | `int \| None` | No | 乱数シード。指定すると Sobol 探索・ベイズ最適化の結果が再現可能になる（デフォルト: `None`） |
 | `prompts` | `dict[str, str]` | No | エージェント別の追加プロンプト（詳細は[プロンプトのカスタマイズ](#プロンプトのカスタマイズ)を参照） |
 | `llm_model` | `str` | No | `.env` の `LLM_MODEL_NAME` を上書きしたい場合に指定 |
@@ -247,7 +241,7 @@ with open("hpo_report.md", "w") as f:
 
 ## パラメーター空間のカスタマイズ
 
-`param_space` を省略した場合、LLM がモデルのクラス名・`eval_fn` のソースコード・試行回数をもとに、適切な探索空間を自動設計します。これは LightGBM / sklearn / PyTorch のすべてのモデル種別で共通の動作です。
+`param_space` を省略した場合、LLM が `eval_fn` のソースコード・試行回数をもとに、適切な探索空間を自動設計します。LightGBM・sklearn・PyTorch を問わず、任意のモデルで利用できます。
 
 探索空間を明示的に指定したい場合は、`ParamSpec` と `ParamSpace` を使って手動指定できます。
 
@@ -261,8 +255,7 @@ custom_space = ParamSpace(specs=(
 ))
 
 agent = HPOAgent(
-    model=model,
-    eval_fn=my_eval,
+    eval_fn=eval_fn,
     n_trials=50,
     param_space=custom_space,
 )
@@ -288,8 +281,7 @@ agent = HPOAgent(
 
 ```python
 agent = HPOAgent(
-    model=model,
-    eval_fn=my_eval,
+    eval_fn=eval_fn,
     n_trials=50,
     prompts={
         "supervisor": "二値分類の精度改善を優先してください。",
@@ -313,8 +305,7 @@ agent = HPOAgent(
 
 ```python
 agent = HPOAgent(
-    model=model,
-    eval_fn=my_eval,
+    eval_fn=eval_fn,
     n_trials=50,
     seed=42,
 )
