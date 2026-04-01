@@ -363,10 +363,10 @@ class TestSeedPropagation:
         )
 
         config = HPOConfig(
-        eval_fn=lambda params: 0.0,
-        n_trials=5,
-        seed=42,
-    )
+            eval_fn=lambda params: 0.0,
+            n_trials=5,
+            seed=42,
+        )
         sobol_tool = SobolSearchTool(
             eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
@@ -1167,9 +1167,9 @@ class TestChangeSearchSpaceIntegration:
             trial_records=[],
             remaining_trials=10,
             config=HPOConfig(
-            eval_fn=lambda params: 0.0,
-            n_trials=10,
-        ),
+                eval_fn=lambda params: 0.0,
+                n_trials=10,
+            ),
         )
         result = supervisor._tool_executor_node(state)
         assert "current_param_space" in result

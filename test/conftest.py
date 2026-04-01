@@ -17,7 +17,6 @@ from langchain_core.messages import AIMessage
 
 from hpo_agent.models import ParamSpace, ParamSpec, SearchSpaceChangeRecord, TrialRecord
 
-
 # ---------------------------------------------------------------------------
 # Fixtures: パラメータ空間・試行履歴
 # ---------------------------------------------------------------------------

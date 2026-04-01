@@ -81,7 +81,9 @@ def eval_fn(params: dict[str, Any]) -> float:
     Returns:
         負の検証 MSE（高いほど良い）。
     """
-    model = MLP(hidden_size=int(params["hidden_size"]), dropout=float(params["dropout"]))
+    model = MLP(
+        hidden_size=int(params["hidden_size"]), dropout=float(params["dropout"])
+    )
     lr = 1e-3
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()

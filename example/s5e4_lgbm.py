@@ -120,7 +120,9 @@ def main() -> None:
             X_tr, X_val_fold = X_arr.iloc[train_idx], X_arr.iloc[val_idx]
             y_tr, y_val_fold = y_arr.iloc[train_idx], y_arr.iloc[val_idx]
 
-            fold_model = lgb.LGBMRegressor(verbosity=-1, random_state=RANDOM_STATE, **params)
+            fold_model = lgb.LGBMRegressor(
+                verbosity=-1, random_state=RANDOM_STATE, **params
+            )
             fold_model.fit(X_tr, y_tr)
             preds = fold_model.predict(X_val_fold)
             rmse_scores.append(root_mean_squared_error(y_val_fold, preds))
