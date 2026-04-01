@@ -16,7 +16,7 @@ pytestmark = pytest.mark.hpo
 
 
 def _make_sobol_result(
-    dummy_adapter: Any,
+    dummy_eval_fn: Any,
     simple_param_space: Any,
     n_trials: int = 10,
     seed: int = 42,
@@ -25,7 +25,7 @@ def _make_sobol_result(
     from hpo_agent.tools import SobolSearchTool
 
     tool = SobolSearchTool(
-        adapter=dummy_adapter,
+        eval_fn=dummy_eval_fn,
         param_space=simple_param_space,
         seed=seed,
         name="sobol_search",
@@ -35,7 +35,7 @@ def _make_sobol_result(
 
 
 def _run_supervisor_with_sobol(
-    dummy_adapter: Any,
+    dummy_eval_fn: Any,
     simple_param_space: Any,
     n_trials: int = 10,
     seed: int = 42,
@@ -65,30 +65,27 @@ def _run_supervisor_with_sobol(
     ]
 
     config = HPOConfig(
-        model=object(),
-        eval_fn=lambda m, X, y: 0.0,
+        eval_fn=dummy_eval_fn,
         n_trials=n_trials,
-        X=None,
-        y=None,
         seed=seed,
     )
     tools = [
         SobolSearchTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=seed,
             name="sobol_search",
             description="test",
         ),
         BayesianOptimizationTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=seed,
             name="bayesian_optimization",
             description="test",
         ),
         ExpertAgentTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             llm=MagicMock(),
             system_prompt="test",
@@ -107,55 +104,55 @@ def _run_supervisor_with_sobol(
 
 class TestResultCorrectness:
     def test_best_score_equals_max(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-01: best_score が全試行の最良値と一致する."""
         result = _run_supervisor_with_sobol(
-            dummy_adapter=dummy_adapter,
+            dummy_eval_fn=dummy_eval_fn,
             simple_param_space=simple_param_space,
             n_trials=5,
         )
         assert result.best_score == result.trials_df["score"].max()
 
     def test_trials_df_row_count_matches_n_trials(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-10: trials_df の行数が n_trials 以内."""
         n_trials = 5
         result = _run_supervisor_with_sobol(
-            dummy_adapter=dummy_adapter,
+            dummy_eval_fn=dummy_eval_fn,
             simple_param_space=simple_param_space,
             n_trials=n_trials,
         )
         assert len(result.trials_df) <= n_trials
 
     def test_best_params_achieves_best_score(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-02: best_params を eval_fn に渡すと best_score と一致する."""
         result = _run_supervisor_with_sobol(
-            dummy_adapter=dummy_adapter,
+            dummy_eval_fn=dummy_eval_fn,
             simple_param_space=simple_param_space,
             n_trials=5,
         )
         # DummyAdapter は常に 0.85 を返すため、best_params の評価結果も 0.85 になる
-        score = dummy_adapter.evaluate(result.best_params)
+        score = dummy_eval_fn(result.best_params)
         assert abs(score - result.best_score) < 1e-6
 
 
 class TestSeedReproducibility:
     def test_sobol_reproducible_with_seed(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-04: Sobol 探索が同一シードで再現可能."""
         results_a = _make_sobol_result(
-            dummy_adapter=dummy_adapter,
+            dummy_eval_fn=dummy_eval_fn,
             simple_param_space=simple_param_space,
             n_trials=10,
             seed=42,
         )
         results_b = _make_sobol_result(
-            dummy_adapter=dummy_adapter,
+            dummy_eval_fn=dummy_eval_fn,
             simple_param_space=simple_param_space,
             n_trials=10,
             seed=42,
@@ -165,20 +162,20 @@ class TestSeedReproducibility:
         assert params_a == params_b
 
     def test_bayesian_reproducible_with_seed(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-03: ベイズ最適化が同一シードで再現可能."""
         from hpo_agent.tools import BayesianOptimizationTool
 
         tool_a = BayesianOptimizationTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=42,
             name="bayesian_optimization",
             description="test",
         )
         tool_b = BayesianOptimizationTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=42,
             name="bayesian_optimization",
@@ -191,11 +188,11 @@ class TestSeedReproducibility:
 
 class TestSobolCoverage:
     def test_sobol_covers_param_space_uniformly(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-05: Sobol 20試行で num_leaves の全4分位をカバー."""
         results = _make_sobol_result(
-            dummy_adapter=dummy_adapter,
+            dummy_eval_fn=dummy_eval_fn,
             simple_param_space=simple_param_space,
             n_trials=20,
             seed=0,
@@ -211,11 +208,11 @@ class TestSobolCoverage:
 
 class TestParamSpaceConstraints:
     def test_all_params_within_bounds(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-07: 全試行のパラメータが param_space 制約を満たす."""
         results = _make_sobol_result(
-            dummy_adapter=dummy_adapter,
+            dummy_eval_fn=dummy_eval_fn,
             simple_param_space=simple_param_space,
             n_trials=20,
             seed=42,
@@ -228,11 +225,11 @@ class TestParamSpaceConstraints:
 
 class TestTimingMeasurement:
     def test_eval_duration_positive(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-08: 全試行の eval_duration が正の値（DummyAdapter は sleep(0.001) あり）."""
         results = _make_sobol_result(
-            dummy_adapter=dummy_adapter,
+            dummy_eval_fn=dummy_eval_fn,
             simple_param_space=simple_param_space,
             n_trials=5,
             seed=42,
@@ -240,11 +237,11 @@ class TestTimingMeasurement:
         assert all(r.eval_duration > 0 for r in results)
 
     def test_algo_duration_non_negative(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-09: 全試行の algo_duration が非負."""
         results = _make_sobol_result(
-            dummy_adapter=dummy_adapter,
+            dummy_eval_fn=dummy_eval_fn,
             simple_param_space=simple_param_space,
             n_trials=5,
             seed=42,
@@ -254,12 +251,12 @@ class TestTimingMeasurement:
 
 class TestStability:
     def test_run_three_times_without_crash(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-10: 同一条件で3回実行してもクラッシュしない（安定性）."""
         for _ in range(3):
             _run_supervisor_with_sobol(
-                dummy_adapter=dummy_adapter,
+                dummy_eval_fn=dummy_eval_fn,
                 simple_param_space=simple_param_space,
                 n_trials=3,
                 seed=0,
@@ -268,7 +265,7 @@ class TestStability:
 
 class TestNarrowedSpaceConstraints:
     def test_params_within_narrowed_bounds(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """HPO-07b: SobolSearchTool に narrow した ParamSpace を渡すと全試行が狭めた bounds 内."""
         from hpo_agent.models import ParamSpace, ParamSpec
@@ -284,7 +281,7 @@ class TestNarrowedSpaceConstraints:
             )
         )
         tool = SobolSearchTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=42,
             name="sobol_search",

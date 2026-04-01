@@ -211,7 +211,7 @@ class BayesianOptimizationTool(HPOToolBase):
             algo_duration = time.perf_counter() - algo_start
 
             eval_start = time.perf_counter()
-            score = self.adapter.evaluate(suggested_params)
+            score = self.eval_fn(suggested_params)
             eval_duration = time.perf_counter() - eval_start
             best_so_far = max(best_so_far, score)
 
