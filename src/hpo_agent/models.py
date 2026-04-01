@@ -150,22 +150,16 @@ class HPOConfig:
     """エージェント実行に必要な設定値を保持する。
 
     Attributes:
-        model: チューニング対象モデル。
-        eval_fn: ユーザー定義評価関数。シグネチャ: (model, X, y) -> float。
+        eval_fn: ユーザー定義評価関数。シグネチャ: (params: dict) -> float。
         n_trials: 総試行回数。
-        X: 特徴量データ。
-        y: ターゲットデータ。
-        param_space: 最適化対象パラメータ空間。None の場合はアダプターのデフォルトを使用。
+        param_space: 最適化対象パラメータ空間。None の場合は LLM が自動生成する。
         seed: 乱数シード。None の場合は非決定的。
         prompts: エージェント別追加プロンプトの辞書。キー例: "supervisor", "expert_agent"。
         llm_model: LLM モデル名（.env 設定の上書き用）。
     """
 
-    model: Any
-    eval_fn: Callable[..., float]
+    eval_fn: Callable[[dict[str, Any]], float]
     n_trials: int
-    X: Any = None
-    y: Any = None
     param_space: ParamSpace | None = None
     seed: int | None = None
     prompts: dict[str, str] = field(default_factory=dict)

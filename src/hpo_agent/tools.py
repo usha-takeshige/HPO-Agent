@@ -7,6 +7,7 @@ import logging
 import re
 import time
 from abc import abstractmethod
+from collections.abc import Callable
 from datetime import datetime
 from math import exp, log
 from typing import Any
@@ -17,7 +18,6 @@ from langchain_core.tools import BaseTool
 from pydantic import ConfigDict, Field
 from scipy.stats.qmc import Sobol  # type: ignore[import-untyped]
 
-from hpo_agent.adapters import ModelAdapterBase
 from hpo_agent.models import ParamSpace, ParamSpec, TrialRecord
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class HPOToolBase(BaseTool):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    adapter: ModelAdapterBase = Field(...)
+    eval_fn: Callable[[dict[str, Any]], float] = Field(...)
     param_space: ParamSpace = Field(...)
 
     @abstractmethod
@@ -122,7 +122,7 @@ class SobolSearchTool(HPOToolBase):
                 params[spec.name] = rng.choice(list(spec.choices))
 
             eval_start = time.perf_counter()
-            score = self.adapter.evaluate(params)
+            score = self.eval_fn(params)
             eval_duration = time.perf_counter() - eval_start
             best_so_far = max(best_so_far, score)
 
@@ -384,7 +384,7 @@ class ExpertAgentTool(HPOToolBase):
             reasoning: str = parsed.get("reasoning", "")
 
             eval_start = time.perf_counter()
-            score = self.adapter.evaluate(params)
+            score = self.eval_fn(params)
             eval_duration = time.perf_counter() - eval_start
 
             best_so_far = max(best_so_far, score)
