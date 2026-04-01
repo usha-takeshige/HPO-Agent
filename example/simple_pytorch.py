@@ -66,33 +66,22 @@ y_val = X_val[:, 0] * 2.0 + X_val[:, 1] - X_val[:, 2] * 0.5 + torch.randn(100) *
 
 
 # ---------------------------------------------------------------------------
-# モデルファクトリ・評価関数
+# 評価関数
 # ---------------------------------------------------------------------------
 
 
-def model_fn(params: dict[str, Any]) -> MLP:
-    """パラメータからモデルを生成するファクトリ関数。
+def eval_fn(params: dict[str, Any]) -> float:
+    """パラメータからモデルを構築・学習・評価してスコア（負の MSE）を返す評価関数。
+
+    HPO-Agent は大きいほど良いスコアを期待するため、MSE の符号を反転して返す。
 
     Args:
         params: ハイパーパラメータの辞書。
 
     Returns:
-        初期化済みの MLP モデル。
-    """
-    return MLP(hidden_size=int(params["hidden_size"]), dropout=float(params["dropout"]))
-
-
-def eval_fn(model: MLP) -> float:
-    """モデルを学習・評価してスコア（負の MSE）を返す評価関数。
-
-    HPO-Agent は大きいほど良いスコアを期待するため、MSE の符号を反転して返す。
-
-    Args:
-        model: ファクトリ関数が生成した MLP モデル。
-
-    Returns:
         負の検証 MSE（高いほど良い）。
     """
+    model = MLP(hidden_size=int(params["hidden_size"]), dropout=float(params["dropout"]))
     lr = 1e-3
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
@@ -152,7 +141,6 @@ def main() -> None:
 
     # --- 方法1: param_space を明示的に指定する（従来の方法）---
     # agent = HPOAgent(
-    #     model=model_fn,
     #     eval_fn=eval_fn,
     #     n_trials=15,
     #     param_space=param_space,  # 明示的に指定
@@ -160,9 +148,8 @@ def main() -> None:
     # )
 
     # --- 方法2: param_space を省略して LLM に自動生成させる ---
-    # eval_fn のソースコードとモデルクラス名をもとに LLM が探索空間を設計する
+    # eval_fn のソースコードをもとに LLM が探索空間を設計する
     # agent = HPOAgent(
-    #     model=model_fn,
     #     eval_fn=eval_fn,
     #     n_trials=15,
     #     # param_space を省略 → LLM が自動生成
@@ -170,10 +157,9 @@ def main() -> None:
     # )
 
     # --- 方法3: パラメータ名と型のみ指定して LLM に範囲を補完させる ---
-    # モデル固有のパラメータ名（hidden_size / dropout）を明示することで
+    # パラメータ名（hidden_size / dropout）を明示することで
     # LLM が誤った名前を生成するリスクを排除しつつ、範囲設計を LLM に委ねる
     agent = HPOAgent(
-        model=model_fn,
         eval_fn=eval_fn,
         n_trials=5,
         param_space=partial_param_space,  # 名前・型のみ指定 → LLM が範囲を補完

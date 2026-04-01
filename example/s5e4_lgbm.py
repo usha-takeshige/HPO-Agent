@@ -21,7 +21,6 @@ LGBMRegressor のハイパーパラメーターを最適化する。
 
 from __future__ import annotations
 
-import copy
 import logging
 import pathlib
 
@@ -83,44 +82,6 @@ def load_data(path: pathlib.Path) -> tuple[pd.DataFrame, pd.Series]:
 
 
 # ---------------------------------------------------------------------------
-# 評価関数（KFold CV による負の RMSE）
-# ---------------------------------------------------------------------------
-
-
-def eval_fn(model: lgb.LGBMRegressor, X: pd.DataFrame, y: pd.Series) -> float:
-    """KFold 5 分割 CV の平均 RMSE を負値で返す評価関数。
-
-    HPO-Agent はスコアを最大化するため、RMSE を負値に変換して返す。
-    model はパラメータ設定済みのインスタンスとして渡される。
-    各フォールドで deepcopy して再学習する。
-
-    Args:
-        model: パラメータ設定済みの LGBMRegressor（フィット済みだが再利用しない）。
-        X: 特徴量。
-        y: ターゲット。
-
-    Returns:
-        負の平均 RMSE（0 に近いほど良い）。
-    """
-    kf = KFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
-    rmse_scores: list[float] = []
-
-    X_arr = X.reset_index(drop=True)
-    y_arr = y.reset_index(drop=True)
-
-    for train_idx, val_idx in kf.split(X_arr):
-        X_tr, X_val = X_arr.iloc[train_idx], X_arr.iloc[val_idx]
-        y_tr, y_val = y_arr.iloc[train_idx], y_arr.iloc[val_idx]
-
-        fold_model = copy.deepcopy(model)
-        fold_model.fit(X_tr, y_tr)
-        preds = fold_model.predict(X_val)
-        rmse_scores.append(root_mean_squared_error(y_val, preds))
-
-    return -float(np.mean(rmse_scores))
-
-
-# ---------------------------------------------------------------------------
 # パラメータ空間
 # ---------------------------------------------------------------------------
 
@@ -147,16 +108,29 @@ def main() -> None:
     X, y = load_data(DATA_PATH)
     print(f"データ形状: {X.shape}, ターゲット: {TARGET_COL}\n")
 
-    # ベースモデル
-    model = lgb.LGBMRegressor(verbosity=-1, random_state=RANDOM_STATE)
+    def eval_fn(params: dict) -> float:
+        """KFold 5 分割 CV の平均 RMSE を負値で返す評価関数。"""
+        kf = KFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+        rmse_scores: list[float] = []
+
+        X_arr = X.reset_index(drop=True)
+        y_arr = y.reset_index(drop=True)
+
+        for train_idx, val_idx in kf.split(X_arr):
+            X_tr, X_val_fold = X_arr.iloc[train_idx], X_arr.iloc[val_idx]
+            y_tr, y_val_fold = y_arr.iloc[train_idx], y_arr.iloc[val_idx]
+
+            fold_model = lgb.LGBMRegressor(verbosity=-1, random_state=RANDOM_STATE, **params)
+            fold_model.fit(X_tr, y_tr)
+            preds = fold_model.predict(X_val_fold)
+            rmse_scores.append(root_mean_squared_error(y_val_fold, preds))
+
+        return -float(np.mean(rmse_scores))
 
     # HPOAgent 実行
     agent = HPOAgent(
-        model=model,
         eval_fn=eval_fn,
         n_trials=20,
-        X=X,
-        y=y,
         param_space=PARAM_SPACE,
         seed=RANDOM_STATE,
     )

@@ -33,8 +33,8 @@ MVP（最小実装）として LightGBM を対象とする。
 | フェーズ | 対応モデル | 備考 |
 |---|---|---|
 | MVP | LightGBM | 初期評価・動作検証 |
-| 対応済み | scikit-learn 系モデル | fit/predict インターフェース準拠。param_space の指定が必須 |
-| 対応済み | PyTorch | `model_fn: (params) -> model` + `eval_fn: (model) -> float` で対応。param_space の指定が必須。 |
+| 対応済み | scikit-learn 系モデル | `eval_fn: (params: dict) -> float` でユーザーが fit/predict を記述。param_space の指定が必須 |
+| 対応済み | PyTorch | `eval_fn: (params: dict) -> float` でユーザーがモデル構築・学習・評価を記述。param_space の指定が必須 |
 
 ### 2.2 対象外
 
@@ -51,12 +51,13 @@ MVP（最小実装）として LightGBM を対象とする。
 ```python
 from hpo_agent import HPOAgent
 
-def my_eval(model, X, y) -> float:
-    # スコアを返すカスタム評価関数
-    ...
+def my_eval(params: dict) -> float:
+    # パラメータを受け取り、モデルを構築・学習・評価してスコアを返す
+    model = lgb.LGBMClassifier(**params)
+    model.fit(X_train, y_train)
+    return float(accuracy_score(y_train, model.predict(X_train)))
 
 agent = HPOAgent(
-    model=lgbm_model,
     eval_fn=my_eval,
     n_trials=50,
     prompts={
@@ -75,12 +76,9 @@ print(result.best_params)     # 最良パラメータ
 
 | パラメータ | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `model` | `Any` | Yes | チューニング対象のモデルオブジェクト |
-| `X` | `Any` | No | 学習に使用する特徴量データ。LightGBM / sklearn モデルでは必須。PyTorch モデルでは不要。 |
-| `y` | `Any` | No | 学習に使用するターゲットデータ。LightGBM / sklearn モデルでは必須。PyTorch モデルでは不要。 |
-| `eval_fn` | `Callable` | Yes | ユーザー定義の評価関数。スコア（float）を返す |
+| `eval_fn` | `Callable[[dict], float]` | Yes | ユーザー定義の評価関数。パラメータ辞書を受け取り、スコア（float）を返す |
 | `n_trials` | `int` | Yes | HPO の総試行回数 |
-| `param_space` | `ParamSpace` | No | 最適化対象のハイパーパラメーターを指定する。指定がない場合はモデルアダプターのデフォルト空間を使用する |
+| `param_space` | `ParamSpace` | No | 最適化対象のハイパーパラメーターを指定する。指定がない場合は LLM が `eval_fn` のソースコードをもとに自動生成する |
 | `seed` | `int \| None` | No | 乱数シード。指定すると Sobol 列・ベイズ最適化サンプラーの乱数が固定され、実験が再現可能になる。`None`（デフォルト）の場合は非決定的 |
 | `prompts` | `dict[str, str]` | No | エージェント別のユーザープロンプト（後述） |
 | `llm_model` | `str` | No | `.env` の LLM モデル名を上書きしたい場合に指定 |
@@ -281,7 +279,6 @@ pandas DataFrame として返却。以下のカラムを含む（最低限）。
 
 ```python
 agent = HPOAgent(
-    model=lgbm_model,
     eval_fn=my_eval,
     n_trials=50,
     prompts={

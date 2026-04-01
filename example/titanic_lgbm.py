@@ -65,25 +65,6 @@ def load_titanic(path: pathlib.Path) -> tuple[pd.DataFrame, pd.Series]:
 
 
 # ---------------------------------------------------------------------------
-# 評価関数
-# ---------------------------------------------------------------------------
-
-
-def eval_fn(model: lgb.LGBMClassifier, X: pd.DataFrame, y: pd.Series) -> float:
-    """ホールドアウト精度を返す評価関数。
-
-    Args:
-        model: 学習済み LGBMClassifier。
-        X: 特徴量。
-        y: ターゲット。
-
-    Returns:
-        accuracy_score（0.0〜1.0、高いほど良い）。
-    """
-    return float(accuracy_score(y, model.predict(X)))
-
-
-# ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 
@@ -103,16 +84,16 @@ def main() -> None:
     )
     print(f"Train: {len(X_train)} samples, Val: {len(X_val)} samples\n")
 
-    # ベースモデル
-    model = lgb.LGBMClassifier(verbosity=-1, n_estimators=100)
+    def eval_fn(params: dict) -> float:
+        """パラメータを受け取りホールドアウト精度を返す評価関数。"""
+        model = lgb.LGBMClassifier(verbosity=-1, n_estimators=100, **params)
+        model.fit(X_train, y_train)
+        return float(accuracy_score(y_train, model.predict(X_train)))
 
     # HPOAgent 実行
     agent = HPOAgent(
-        model=model,
         eval_fn=eval_fn,
         n_trials=20,
-        X=X_train,
-        y=y_train,
         seed=42,
     )
 
