@@ -261,14 +261,25 @@ agent = HPOAgent(
 )
 ```
 
+### 上限・下限を片方だけ指定する（部分指定）
+
+`low` と `high` はどちらか一方だけ指定することもできます。指定しなかった側の値は LLM が自動的に補完します。パラメーター名と型を明示しつつ、範囲設計を LLM に委ねたい場合に便利です。
+
+```python
+partial_space = ParamSpace(specs=(
+    ParamSpec(name="n_estimators", type="int", high=500),   # 最大 500 に固定、最小は LLM が決定
+    ParamSpec(name="learning_rate", type="float", low=1e-4), # 最小 1e-4 に固定、最大は LLM が決定
+))
+```
+
 ### ParamSpec のフィールド
 
 | フィールド | 説明 |
 |---|---|
 | `name` | パラメーター名（モデルの引数名と一致させる） |
 | `type` | `"int"` / `"float"` / `"categorical"` |
-| `low` | 数値型の下限値（`"int"` / `"float"` で必須） |
-| `high` | 数値型の上限値（`"int"` / `"float"` で必須） |
+| `low` | 数値型の下限値。省略すると LLM が補完する |
+| `high` | 数値型の上限値。省略すると LLM が補完する |
 | `choices` | 選択肢のタプル（`"categorical"` で必須） |
 | `log` | `True` のとき対数スケールで探索（`low > 0` が必要） |
 
