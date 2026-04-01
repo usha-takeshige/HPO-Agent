@@ -19,7 +19,7 @@ pytestmark = pytest.mark.agent
 def _run_with_mock(
     n_trials: int,
     llm: Any,
-    adapter: Any,
+    eval_fn: Any,
     param_space: Any,
     seed: int | None = None,
     prompts: dict[str, str] | None = None,
@@ -37,32 +37,29 @@ def _run_with_mock(
 
     prompts = prompts or {}
     config = HPOConfig(
-        model=object(),
-        eval_fn=lambda m, X, y: 0.0,
+        eval_fn=eval_fn,
         n_trials=n_trials,
-        X=None,
-        y=None,
         seed=seed,
         prompts=prompts,
     )
 
     tools = [
         SobolSearchTool(
-            adapter=adapter,
+            eval_fn=eval_fn,
             param_space=param_space,
             seed=seed,
             name="sobol_search",
             description="Sobol 列による準ランダム探索",
         ),
         BayesianOptimizationTool(
-            adapter=adapter,
+            eval_fn=eval_fn,
             param_space=param_space,
             seed=seed,
             name="bayesian_optimization",
             description="Optuna によるベイズ最適化",
         ),
         ExpertAgentTool(
-            adapter=adapter,
+            eval_fn=eval_fn,
             param_space=param_space,
             llm=MagicMock(),
             system_prompt="test",
@@ -88,14 +85,14 @@ class TestSupervisorLoop:
     def test_trials_df_has_at_least_one_row(
         self,
         mock_supervisor_llm: MagicMock,
-        dummy_adapter: Any,
+        dummy_eval_fn: Any,
         simple_param_space: Any,
     ) -> None:
         """AGT-01: ツールを少なくとも1回選択してループが終了する."""
         result = _run_with_mock(
             n_trials=5,
             llm=mock_supervisor_llm,
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
         )
         assert len(result.trials_df) >= 1
@@ -103,14 +100,14 @@ class TestSupervisorLoop:
     def test_n_trials_not_exceeded(
         self,
         mock_supervisor_llm: MagicMock,
-        dummy_adapter: Any,
+        dummy_eval_fn: Any,
         simple_param_space: Any,
     ) -> None:
         """AGT-02: 試行回数の合計が n_trials を超えない."""
         result = _run_with_mock(
             n_trials=10,
             llm=mock_supervisor_llm,
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
         )
         assert len(result.trials_df) <= 10
@@ -118,20 +115,20 @@ class TestSupervisorLoop:
     def test_sobol_tool_used(
         self,
         mock_supervisor_llm: MagicMock,
-        dummy_adapter: Any,
+        dummy_eval_fn: Any,
         simple_param_space: Any,
     ) -> None:
         """AGT-03: SobolSearchTool を選択できる."""
         result = _run_with_mock(
             n_trials=5,
             llm=mock_supervisor_llm,
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
         )
         assert "sobol_search" in result.trials_df["tool_used"].values
 
     def test_bayesian_tool_selectable(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-04: BayesianOptimizationTool を選択できる."""
         llm = MagicMock()
@@ -153,13 +150,13 @@ class TestSupervisorLoop:
         result = _run_with_mock(
             n_trials=5,
             llm=llm,
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
         )
         assert "bayesian_optimization" in result.trials_df["tool_used"].values
 
     def test_expert_tool_selectable(
-        self, dummy_adapter: Any, simple_param_space: Any, mock_expert_llm: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any, mock_expert_llm: Any
     ) -> None:
         """AGT-05: ExpertAgentTool を選択できる."""
         from hpo_agent.models import HPOConfig
@@ -185,27 +182,24 @@ class TestSupervisorLoop:
         ]
 
         config = HPOConfig(
-            model=object(),
-            eval_fn=lambda m, X, y: 0.0,
+            eval_fn=lambda params: 0.0,
             n_trials=5,
-            X=None,
-            y=None,
         )
         tools = [
             SobolSearchTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="sobol_search",
                 description="Sobol",
             ),
             BayesianOptimizationTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="bayesian_optimization",
                 description="Bayesian",
             ),
             ExpertAgentTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 llm=mock_expert_llm,
                 system_prompt="test",
@@ -225,7 +219,7 @@ class TestSupervisorLoop:
     def test_intermediate_report_logged(
         self,
         mock_supervisor_llm: MagicMock,
-        dummy_adapter: Any,
+        dummy_eval_fn: Any,
         simple_param_space: Any,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -234,13 +228,13 @@ class TestSupervisorLoop:
             _run_with_mock(
                 n_trials=5,
                 llm=mock_supervisor_llm,
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
             )
         assert any("sobol_search" in record.message for record in caplog.records)
 
     def test_user_prompt_in_supervisor_call(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-08: スーパーバイザーへの LLM 呼び出しに追加プロンプトが含まれる."""
         llm = MagicMock()
@@ -258,7 +252,7 @@ class TestSupervisorLoop:
         _run_with_mock(
             n_trials=5,
             llm=llm,
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             prompts={"supervisor": "テスト指示"},
         )
@@ -269,7 +263,7 @@ class TestSupervisorLoop:
         assert "テスト指示" in all_content
 
     def test_expert_prompt_in_expert_agent_call(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-09: ExpertAgentTool の LLM 呼び出しに追加プロンプトが含まれる."""
         from hpo_agent.models import HPOConfig
@@ -304,27 +298,24 @@ class TestSupervisorLoop:
         )
 
         config = HPOConfig(
-            model=object(),
-            eval_fn=lambda m, X, y: 0.0,
+            eval_fn=lambda params: 0.0,
             n_trials=5,
-            X=None,
-            y=None,
         )
         tools = [
             SobolSearchTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="sobol_search",
                 description="test",
             ),
             BayesianOptimizationTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="bayesian_optimization",
                 description="test",
             ),
             ExpertAgentTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 llm=expert_llm,
                 system_prompt=expert_system_prompt,
@@ -358,7 +349,7 @@ class TestSeedPropagation:
     def test_seed_propagated_to_sobol(
         self,
         mock_supervisor_llm: MagicMock,
-        dummy_adapter: Any,
+        dummy_eval_fn: Any,
         simple_param_space: Any,
     ) -> None:
         """AGT-11: seed=42 が SobolSearchTool に伝播される."""
@@ -372,15 +363,12 @@ class TestSeedPropagation:
         )
 
         config = HPOConfig(
-            model=object(),
-            eval_fn=lambda m, X, y: 0.0,
+            eval_fn=lambda params: 0.0,
             n_trials=5,
-            X=None,
-            y=None,
             seed=42,
         )
         sobol_tool = SobolSearchTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=42,
             name="sobol_search",
@@ -389,14 +377,14 @@ class TestSeedPropagation:
         tools = [
             sobol_tool,
             BayesianOptimizationTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 seed=42,
                 name="bayesian_optimization",
                 description="test",
             ),
             ExpertAgentTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 llm=MagicMock(),
                 system_prompt="test",
@@ -414,13 +402,13 @@ class TestSeedPropagation:
         assert sobol_tool.seed == 42
 
     def test_seed_propagated_to_bayesian(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-12: seed=42 が BayesianOptimizationTool に伝播される."""
         from hpo_agent.tools import BayesianOptimizationTool
 
         bayesian_tool = BayesianOptimizationTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=42,
             name="bayesian_optimization",
@@ -431,7 +419,7 @@ class TestSeedPropagation:
 
 class TestHistoryPassthrough:
     def test_second_tool_receives_first_tool_history(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-10: 2回目のツール呼び出しに前回の試行履歴が渡される."""
         from hpo_agent.models import HPOConfig
@@ -476,27 +464,24 @@ class TestHistoryPassthrough:
         ]
 
         config = HPOConfig(
-            model=object(),
-            eval_fn=lambda m, X, y: 0.0,
+            eval_fn=lambda params: 0.0,
             n_trials=10,
-            X=None,
-            y=None,
         )
         tools = [
             SobolSearchTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="sobol_search",
                 description="test",
             ),
             TrackingBayesianTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="bayesian_optimization",
                 description="test",
             ),
             ExpertAgentTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 llm=MagicMock(),
                 system_prompt="test",
@@ -525,8 +510,8 @@ class TestAutoParamSpaceGeneration:
 
         from hpo_agent.agent import HPOAgent
 
-        model, eval_fn, X, y = lgbm_binary_setup
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5)
 
         with (
             patch.object(agent, "_generate_param_space", wraps=None) as mock_gen,
@@ -561,13 +546,10 @@ class TestAutoParamSpaceGeneration:
         from hpo_agent.agent import HPOAgent
         from hpo_agent.models import HPOResult
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         agent = HPOAgent(
-            model=model,
             eval_fn=eval_fn,
             n_trials=5,
-            X=X,
-            y=y,
             param_space=simple_param_space,
         )
 
@@ -600,8 +582,8 @@ class TestAutoParamSpaceGeneration:
         from hpo_agent.agent import HPOAgent
         from hpo_agent.models import HPOResult
 
-        model, eval_fn, X, y = lgbm_binary_setup
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5)
 
         with (
             patch.object(agent, "_resolve_llm_provider") as mock_provider,
@@ -639,14 +621,11 @@ class TestPartialParamSpaceCompletion:
         from hpo_agent.agent import HPOAgent
         from hpo_agent.models import HPOResult, ParamSpace, ParamSpec
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         partial_space = ParamSpace(specs=(ParamSpec(name="n_estimators", type="int"),))
         agent = HPOAgent(
-            model=model,
             eval_fn=eval_fn,
             n_trials=5,
-            X=X,
-            y=y,
             param_space=partial_space,
         )
 
@@ -678,13 +657,10 @@ class TestPartialParamSpaceCompletion:
         from hpo_agent.agent import HPOAgent
         from hpo_agent.models import HPOResult
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         agent = HPOAgent(
-            model=model,
             eval_fn=eval_fn,
             n_trials=5,
-            X=X,
-            y=y,
             param_space=simple_param_space,
         )
 
@@ -714,14 +690,11 @@ class TestPartialParamSpaceCompletion:
         from hpo_agent.agent import HPOAgent
         from hpo_agent.models import HPOResult, ParamSpace, ParamSpec
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         partial_space = ParamSpace(specs=(ParamSpec(name="n_estimators", type="int"),))
         agent = HPOAgent(
-            model=model,
             eval_fn=eval_fn,
             n_trials=5,
-            X=X,
-            y=y,
             param_space=partial_space,
         )
 
@@ -754,7 +727,7 @@ class TestPartialParamSpaceCompletion:
         from hpo_agent.agent import HPOAgent
         from hpo_agent.models import HPOResult, ParamSpace, ParamSpaceSchema, ParamSpec
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         complete_spec = ParamSpec(
             name="learning_rate", type="float", low=0.01, high=0.3
         )
@@ -762,11 +735,8 @@ class TestPartialParamSpaceCompletion:
         mixed_space = ParamSpace(specs=(complete_spec, partial_spec))
 
         agent = HPOAgent(
-            model=model,
             eval_fn=eval_fn,
             n_trials=5,
-            X=X,
-            y=y,
             param_space=mixed_space,
         )
 
@@ -823,18 +793,15 @@ class TestPartialParamSpaceCompletion:
             ParamSpecSchema,
         )
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         partial_spec = ParamSpec(
             name="learning_rate", type="float", low=0.001, log=True
         )
         partial_space = ParamSpace(specs=(partial_spec,))
 
         agent = HPOAgent(
-            model=model,
             eval_fn=eval_fn,
             n_trials=5,
-            X=X,
-            y=y,
             param_space=partial_space,
         )
 
@@ -892,16 +859,13 @@ class TestPartialParamSpaceCompletion:
             ParamSpecSchema,
         )
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         partial_spec = ParamSpec(name="num_leaves", type="int", high=300)
         partial_space = ParamSpace(specs=(partial_spec,))
 
         agent = HPOAgent(
-            model=model,
             eval_fn=eval_fn,
             n_trials=5,
-            X=X,
-            y=y,
             param_space=partial_space,
         )
 
@@ -958,16 +922,13 @@ class TestPartialParamSpaceCompletion:
             ParamSpecSchema,
         )
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         partial_spec = ParamSpec(name="dropout", type="float")
         partial_space = ParamSpace(specs=(partial_spec,))
 
         agent = HPOAgent(
-            model=model,
             eval_fn=eval_fn,
             n_trials=5,
-            X=X,
-            y=y,
             param_space=partial_space,
         )
 
@@ -1011,7 +972,7 @@ class TestPartialParamSpaceCompletion:
 
 class TestExpertHistorySelection:
     def test_history_selection_limit(
-        self, dummy_adapter: Any, simple_param_space: Any, mock_expert_llm: MagicMock
+        self, dummy_eval_fn: Any, simple_param_space: Any, mock_expert_llm: MagicMock
     ) -> None:
         """AGT-13: 30件の履歴からスコア上位20件+直近10件が選ばれる."""
         from datetime import datetime
@@ -1043,7 +1004,7 @@ class TestExpertHistorySelection:
         mock_expert_llm.invoke = tracking_invoke
 
         tool = ExpertAgentTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             llm=mock_expert_llm,
             system_prompt="test",
@@ -1064,7 +1025,7 @@ class TestExpertHistorySelection:
 
 class TestChangeSearchSpaceIntegration:
     def test_change_search_space_tool_selectable(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-14: change_search_space ツールが Supervisor に渡されエラーなく完了する."""
         import json
@@ -1097,27 +1058,24 @@ class TestChangeSearchSpaceIntegration:
             MagicMock(content="AI 考察テキスト"),
         ]
         config = HPOConfig(
-            model=object(),
-            eval_fn=lambda m, X, y: 0.0,
+            eval_fn=lambda params: 0.0,
             n_trials=5,
-            X=None,
-            y=None,
         )
         tools = [
             SobolSearchTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="sobol_search",
                 description="test",
             ),
             BayesianOptimizationTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="bayesian_optimization",
                 description="test",
             ),
             ExpertAgentTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 llm=MagicMock(),
                 system_prompt="test",
@@ -1141,7 +1099,7 @@ class TestChangeSearchSpaceIntegration:
         assert result is not None
 
     def test_tool_executor_updates_current_param_space(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-16: _tool_executor_node を直接呼び出すと current_param_space が更新される."""
         import json
@@ -1164,7 +1122,7 @@ class TestChangeSearchSpaceIntegration:
             llm=MagicMock(),
             tools=[
                 SobolSearchTool(
-                    adapter=dummy_adapter,
+                    eval_fn=dummy_eval_fn,
                     param_space=simple_param_space,
                     name="sobol_search",
                     description="test",
@@ -1175,13 +1133,13 @@ class TestChangeSearchSpaceIntegration:
                     description="test",
                 ),
                 BayesianOptimizationTool(
-                    adapter=dummy_adapter,
+                    eval_fn=dummy_eval_fn,
                     param_space=simple_param_space,
                     name="bayesian_optimization",
                     description="test",
                 ),
                 ExpertAgentTool(
-                    adapter=dummy_adapter,
+                    eval_fn=dummy_eval_fn,
                     param_space=simple_param_space,
                     llm=MagicMock(),
                     system_prompt="test",
@@ -1209,11 +1167,8 @@ class TestChangeSearchSpaceIntegration:
             trial_records=[],
             remaining_trials=10,
             config=HPOConfig(
-                model=object(),
-                eval_fn=lambda m, X, y: 0.0,
+                eval_fn=lambda params: 0.0,
                 n_trials=10,
-                X=None,
-                y=None,
             ),
         )
         result = supervisor._tool_executor_node(state)
@@ -1226,7 +1181,7 @@ class TestChangeSearchSpaceIntegration:
         assert nl_spec.high == 70.0
 
     def test_subsequent_sobol_uses_changed_space(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-15: change_search_space 後に Sobol を呼ぶと変更後の範囲内のパラメータのみ返る."""
         import json
@@ -1265,15 +1220,12 @@ class TestChangeSearchSpaceIntegration:
             MagicMock(content="AI 考察テキスト"),
         ]
         config = HPOConfig(
-            model=object(),
-            eval_fn=lambda m, X, y: 0.0,
+            eval_fn=lambda params: 0.0,
             n_trials=5,
-            X=None,
-            y=None,
         )
         tools = [
             SobolSearchTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 seed=0,
                 name="sobol_search",
@@ -1285,13 +1237,13 @@ class TestChangeSearchSpaceIntegration:
                 description="test",
             ),
             BayesianOptimizationTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="bayesian_optimization",
                 description="test",
             ),
             ExpertAgentTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 llm=MagicMock(),
                 system_prompt="test",
@@ -1313,7 +1265,7 @@ class TestChangeSearchSpaceIntegration:
             assert 50 <= row["num_leaves"] <= 70
 
     def test_final_report_includes_space_change_history(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-18: change_search_space 実行後の最終レポートに探索空間変更履歴が含まれる."""
         import json
@@ -1346,15 +1298,12 @@ class TestChangeSearchSpaceIntegration:
             MagicMock(content="AI 考察テキスト"),
         ]
         config = HPOConfig(
-            model=object(),
-            eval_fn=lambda m, X, y: 0.0,
+            eval_fn=lambda params: 0.0,
             n_trials=5,
-            X=None,
-            y=None,
         )
         tools = [
             SobolSearchTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="sobol_search",
                 description="test",
@@ -1365,13 +1314,13 @@ class TestChangeSearchSpaceIntegration:
                 description="test",
             ),
             BayesianOptimizationTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="bayesian_optimization",
                 description="test",
             ),
             ExpertAgentTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 llm=MagicMock(),
                 system_prompt="test",
@@ -1391,7 +1340,7 @@ class TestChangeSearchSpaceIntegration:
         assert "変更後" in result.report
 
     def test_subsequent_sobol_uses_expanded_space(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """AGT-17: change_search_space で拡大後に Sobol を呼ぶと拡大した範囲内でサンプリングされる."""
         import json
@@ -1431,15 +1380,12 @@ class TestChangeSearchSpaceIntegration:
             MagicMock(content="AI 考察テキスト"),
         ]
         config = HPOConfig(
-            model=object(),
-            eval_fn=lambda m, X, y: 0.0,
+            eval_fn=lambda params: 0.0,
             n_trials=5,
-            X=None,
-            y=None,
         )
         tools = [
             SobolSearchTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 seed=0,
                 name="sobol_search",
@@ -1451,13 +1397,13 @@ class TestChangeSearchSpaceIntegration:
                 description="test",
             ),
             BayesianOptimizationTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 name="bayesian_optimization",
                 description="test",
             ),
             ExpertAgentTool(
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
                 llm=MagicMock(),
                 system_prompt="test",
@@ -1484,7 +1430,7 @@ class TestSupervisorPlanDisplay:
 
     def test_supervisor_selection_log(
         self,
-        dummy_adapter: Any,
+        dummy_eval_fn: Any,
         simple_param_space: Any,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -1505,7 +1451,7 @@ class TestSupervisorPlanDisplay:
             _run_with_mock(
                 n_trials=5,
                 llm=llm,
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
             )
         selection_logs = [
@@ -1517,7 +1463,7 @@ class TestSupervisorPlanDisplay:
 
     def test_tool_execution_log_with_trial_cap(
         self,
-        dummy_adapter: Any,
+        dummy_eval_fn: Any,
         simple_param_space: Any,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -1539,7 +1485,7 @@ class TestSupervisorPlanDisplay:
             _run_with_mock(
                 n_trials=10,
                 llm=llm,
-                adapter=dummy_adapter,
+                eval_fn=dummy_eval_fn,
                 param_space=simple_param_space,
             )
         exec_logs = [

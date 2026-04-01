@@ -30,12 +30,8 @@
 | `GoogleLLMProvider` | 具象クラス | Google Gemini の LLM インスタンスを提供する | 5.1 初期対応 LLM |
 | `OpenAILLMProvider` | 具象クラス | OpenAI GPT の LLM インスタンスを提供する | 5.3 拡張性 |
 | `AnthropicLLMProvider` | 具象クラス | Anthropic Claude の LLM インスタンスを提供する | 5.3 拡張性 |
-| `ModelAdapterBase` | 抽象クラス | モデルのパラメータ空間取得・評価実行のインターフェースを定義する | 8.1 拡張性 |
 | `ParamSpecSchema` | Pydantic モデル | LLM の structured output 用パラメータ仕様スキーマ | LLM 自動生成 |
 | `ParamSpaceSchema` | Pydantic モデル | LLM の structured output 用パラメータ空間スキーマ | LLM 自動生成 |
-| `LightGBMAdapter` | 具象クラス | LightGBM に対してパラメータ空間取得・評価を実行する | 2.1 初期対応モデル |
-| `SklearnAdapter` | 具象クラス | scikit-learn 互換モデル（BaseEstimator）に対してパラメータ空間取得・評価を実行する | 2.1 対応モデル |
-| `PyTorchAdapter` | 具象クラス | PyTorch モデルファクトリ関数に対してパラメータ空間取得・評価を実行する | 2.1 対応モデル |
 | `HPOToolBase` | 抽象クラス | HPO ツール（探索アルゴリズム）のインターフェースを定義する | 4.3 ツール一覧 |
 | `BayesianOptimizationTool` | 具象クラス | Optuna によるベイズ最適化を実行する | 4.3 BayesianOptimizationTool |
 | `SobolSearchTool` | 具象クラス | Sobol 列による準ランダム探索を実行する | 4.3 SobolSearchTool |
@@ -58,15 +54,12 @@
 ```python
 @dataclass(frozen=True)
 class HPOConfig:
-    model: Any                           # チューニング対象モデル
-    eval_fn: Callable[..., float]        # ユーザー定義評価関数
-    n_trials: int                        # 総試行回数
-    X: Any                               # 特徴量データ
-    y: Any                               # ターゲットデータ
-    param_space: ParamSpace | None = None  # 最適化対象パラメーター（None のとき adapter のデフォルト使用）
-    seed: int | None = None              # 乱数シード（None のとき非決定的）
+    eval_fn: Callable[[dict[str, Any]], float]  # ユーザー定義評価関数
+    n_trials: int                               # 総試行回数
+    param_space: ParamSpace | None = None       # 最適化対象パラメーター（None のとき LLM が自動生成）
+    seed: int | None = None                     # 乱数シード（None のとき非決定的）
     prompts: dict[str, str] = field(default_factory=dict)  # エージェント別追加プロンプト
-    llm_model: str | None = None         # LLM モデル名（.env 上書き用）
+    llm_model: str | None = None                # LLM モデル名（.env 上書き用）
 ```
 
 **SOLIDチェック**
@@ -249,84 +242,6 @@ class GoogleLLMProvider(LLMProviderBase):
 
 ---
 
-#### `ModelAdapterBase`
-
-**種別**：抽象クラス
-**責務**：モデルのパラメータ空間取得と評価実行のインターフェースを定義する
-**対応する要件の概念**：8.1 拡張性
-
-```python
-class ModelAdapterBase(ABC):
-    @abstractmethod
-    def get_default_param_space(self) -> ParamSpace: ...
-
-    @abstractmethod
-    def evaluate(self, params: dict[str, Any]) -> float: ...
-```
-
-**SOLIDチェック**
-- S: モデル評価インターフェースの定義のみが責務
-- O: 新モデルはサブクラス追加で対応（既存コード変更不要）
-- I: `get_param_space` と `evaluate` は常にセットで使用されるため分離しない
-- D: `HPOToolBase` の実装は `ModelAdapterBase` に依存する
-
----
-
-#### `LightGBMAdapter`
-
-**種別**：具象クラス
-**責務**：LightGBM に対してパラメータ空間取得・評価を実行する
-**対応する要件の概念**：2.1 初期対応モデル（MVP）
-
-```python
-class LightGBMAdapter(ModelAdapterBase):
-    def __init__(
-        self,
-        model: lgb.LGBMModel,
-        eval_fn: Callable[..., float],
-        X: Any,
-        y: Any,
-    ) -> None: ...
-
-    def get_default_param_space(self) -> ParamSpace: ...
-    def evaluate(self, params: dict[str, Any]) -> float: ...
-```
-
-**SOLIDチェック**
-- S: LightGBM 固有のパラメータ空間定義・評価のみが責務
-- L: `ModelAdapterBase` の契約（戻り値の型）を守る
-
----
-
-#### `SklearnAdapter`
-
-**種別**：具象クラス
-**責務**：scikit-learn 互換モデル（BaseEstimator）に対してパラメータ空間取得・評価を実行する
-**対応する要件の概念**：2.1 対応モデル
-
-```python
-class SklearnAdapter(ModelAdapterBase):
-    def __init__(
-        self,
-        model: BaseEstimator,
-        eval_fn: Callable[..., float],
-        X: Any,
-        y: Any,
-    ) -> None: ...
-
-    def get_default_param_space(self) -> ParamSpace: ...  # NotImplementedError を送出
-    def evaluate(self, params: dict[str, Any]) -> float: ...
-```
-
-- `get_default_param_space()` は `NotImplementedError` を送出する。sklearn はモデルが多様なためデフォルト空間を持たない。使用時は `HPOAgent` に `param_space` を必ず指定する
-- `evaluate()` では `sklearn.base.clone()` を使用してモデルを複製する（fitted 状態をリセットするため `copy.deepcopy` ではなく `clone` を採用）
-
-**SOLIDチェック**
-- S: sklearn 互換モデルの評価のみが責務
-- L: `ModelAdapterBase` の契約（戻り値の型）を守る
-
----
-
 #### `HPOToolBase`
 
 **種別**：抽象クラス（LangChain `BaseTool` を継承）
@@ -335,7 +250,7 @@ class SklearnAdapter(ModelAdapterBase):
 
 ```python
 class HPOToolBase(BaseTool, ABC):
-    adapter: ModelAdapterBase
+    eval_fn: Callable[[dict[str, Any]], float]
 
     @abstractmethod
     def _run(self, n_trials: int, trial_history: list[TrialRecord]) -> list[TrialRecord]: ...
@@ -344,7 +259,7 @@ class HPOToolBase(BaseTool, ABC):
 **SOLIDチェック**
 - S: 探索ツールの実行インターフェース定義のみが責務
 - O: 新探索アルゴリズムはサブクラス追加で対応（既存コード変更不要）
-- D: `ModelAdapterBase` の抽象に依存し、LightGBM 等の具体実装に依存しない
+- D: ユーザー定義の `eval_fn` を受け取るシンプルな依存。モデル種別に依存しない
 
 ---
 
@@ -522,11 +437,8 @@ class Supervisor:
 class HPOAgent:
     def __init__(
         self,
-        model: Any,
-        eval_fn: Callable[..., float],
+        eval_fn: Callable[[dict[str, Any]], float],
         n_trials: int,
-        X: Any,
-        y: Any,
         param_space: ParamSpace | None = None,
         seed: int | None = None,
         prompts: dict[str, str] | None = None,
@@ -534,8 +446,7 @@ class HPOAgent:
     ) -> None: ...
 
     def run(self) -> HPOResult: ...
-    def _build_supervisor(self, adapter: ModelAdapterBase, param_space: ParamSpace, generated_param_space: ParamSpace | None = None) -> Supervisor: ...
-    def _resolve_adapter(self) -> tuple[ModelAdapterBase, ParamSpace | None]: ...
+    def _build_supervisor(self, param_space: ParamSpace, generated_param_space: ParamSpace | None = None) -> Supervisor: ...
     def _resolve_llm_provider(self) -> LLMProviderBase: ...
     def _generate_param_space(self) -> ParamSpace: ...
     def _format_param_space(self, param_space: ParamSpace) -> list[str]: ...
@@ -543,8 +454,8 @@ class HPOAgent:
 
 **SOLIDチェック**
 - S: 依存解決とエントリーポイントの提供のみが責務（探索・評価・レポート生成は行わない）
-- O: 新モデルや新 LLM は `_resolve_*` の分岐追加のみで対応可能
-- D: `ModelAdapterBase` / `LLMProviderBase` / `Supervisor` の抽象・クラスに依存
+- O: 新 LLM は `_resolve_llm_provider` の分岐追加のみで対応可能
+- D: `LLMProviderBase` / `Supervisor` の抽象・クラスに依存
 
 ---
 
@@ -559,11 +470,9 @@ sequenceDiagram
     participant Supervisor
     participant LangGraph
     participant HPOToolBase
-    participant ModelAdapterBase
     participant ReportGenerator
 
     User->>HPOAgent: run()
-    HPOAgent->>HPOAgent: _resolve_adapter()
     HPOAgent->>HPOAgent: _resolve_llm_provider()
     HPOAgent->>HPOAgent: _build_supervisor()
     HPOAgent->>Supervisor: run(config)
@@ -572,8 +481,7 @@ sequenceDiagram
     loop remaining_trials > 0
         LangGraph->>LangGraph: LLM がツールと n_trials を決定
         LangGraph->>HPOToolBase: _run(n_trials, trial_history)
-        HPOToolBase->>ModelAdapterBase: evaluate(params)
-        ModelAdapterBase-->>HPOToolBase: score: float
+        HPOToolBase->>HPOToolBase: eval_fn(params)
         HPOToolBase-->>LangGraph: list[TrialRecord]
         LangGraph->>LangGraph: _tool_executor_node() が SupervisorState を更新（trial_records, remaining_trials）
         LangGraph->>ReportGenerator: generate_intermediate(trial_records, best_params, best_score)
@@ -596,14 +504,12 @@ sequenceDiagram
     participant Supervisor
     participant ExpertAgentTool
     participant LLM as Expert LLM
-    participant ModelAdapterBase
 
     Supervisor->>ExpertAgentTool: _run(n_trials, trial_history)
     loop n_trials 回
         ExpertAgentTool->>LLM: 試行履歴を渡してパラメータ提案を依頼
         LLM-->>ExpertAgentTool: 提案パラメータ（JSON）
-        ExpertAgentTool->>ModelAdapterBase: evaluate(params)
-        ModelAdapterBase-->>ExpertAgentTool: score: float
+        ExpertAgentTool->>ExpertAgentTool: eval_fn(params) → score: float
         ExpertAgentTool->>ExpertAgentTool: TrialRecord を追加
     end
     ExpertAgentTool-->>Supervisor: list[TrialRecord]
@@ -625,7 +531,7 @@ Supervisor.run(config)
     │       current_report: str  ← ツール実行ごとに更新
     │
     ├── [ループ] HPOToolBase._run() → list[TrialRecord]
-    │       │   ModelAdapterBase.evaluate() → float
+    │       │   eval_fn(params) → float
     │       │
     │       └── _tool_executor_node() 内で ReportGenerator.generate_intermediate() を呼び出す
     │               logging.INFO(intermediate_report)  ─→ [コンソール出力（ユーザーが確認可能）]
@@ -647,7 +553,6 @@ Supervisor.run(config)
 | パターン名 | 適用箇所（クラス名） | 採用理由 |
 |-----------|-------------------|---------|
 | Strategy | `HPOToolBase` / `BayesianOptimizationTool` / `SobolSearchTool` / `ExpertAgentTool` | 探索アルゴリズムを実行時に切り替え可能にし、Supervisor がアルゴリズムの詳細に依存しないようにする |
-| Adapter | `ModelAdapterBase` / `LightGBMAdapter` / `SklearnAdapter` / `PyTorchAdapter` | LightGBM・sklearn・PyTorch 等のモデルインターフェースの違いを吸収し、ツールがモデル種別に依存しないようにする |
 | Abstract Factory | `LLMProviderBase` / `GoogleLLMProvider` / `OpenAILLMProvider` / `AnthropicLLMProvider` | LLM プロバイダーの切り替えをコード修正なしに実現する |
 | Dependency Injection | `HPOAgent._build_supervisor()` | `Supervisor` に渡す依存（LLM・ツール・レポートジェネレーター）を外部から注入することでテスタビリティを高める |
 
@@ -656,12 +561,6 @@ Supervisor.run(config)
 **適用箇所**：`HPOToolBase` とその具象クラス群
 **採用理由**：Supervisor（LangGraph エージェント）が実行時に最適なツールを選択できるよう、各探索アルゴリズムを交換可能な戦略として定義する。新しい探索手法の追加が `HPOToolBase` のサブクラス作成のみで完結する。
 **代替案と却下理由**：Template Method パターンも検討したが、各ツールの共通フローが少ないため、柔軟な Strategy を採用。
-
-### Adapter パターンの詳細
-
-**適用箇所**：`ModelAdapterBase` とその具象クラス群
-**採用理由**：LightGBM と sklearn は API が異なり（`LGBMModel` vs `BaseEstimator`）、また PyTorch は fit/predict を持たない。各モデルの差異を Adapter が吸収することで、ツール側のコード変更なしにモデルを切り替えられる。
-**代替案と却下理由**：`eval_fn` 渡しのみに依存する案も検討したが、パラメータ空間定義もモデル種別ごとに異なるため Adapter で一元管理する方が適切と判断。
 
 ---
 
@@ -672,17 +571,13 @@ classDiagram
     class HPOAgent {
         -config: HPOConfig
         +run() HPOResult
-        -_build_supervisor(adapter, param_space) Supervisor
-        -_resolve_adapter() tuple
+        -_build_supervisor(param_space) Supervisor
         -_resolve_llm_provider() LLMProviderBase
     }
 
     class HPOConfig {
-        +model: Any
         +eval_fn: Callable
         +n_trials: int
-        +X: Any
-        +y: Any
         +param_space: ParamSpace
         +seed: int
         +prompts: dict
@@ -739,34 +634,9 @@ classDiagram
         +evaluate(params: dict) float
     }
 
-    class LightGBMAdapter {
-        -model: LGBMModel
-        -eval_fn: Callable
-        -X: Any
-        -y: Any
-        +get_default_param_space() ParamSpace
-        +evaluate(params: dict) float
-    }
-
-    class SklearnAdapter {
-        -model: BaseEstimator
-        -eval_fn: Callable
-        -X: Any
-        -y: Any
-        +get_default_param_space() ParamSpace
-        +evaluate(params: dict) float
-    }
-
-    class PyTorchAdapter {
-        -model_fn: Callable
-        -eval_fn: Callable
-        +get_default_param_space() ParamSpace
-        +evaluate(params: dict) float
-    }
-
     class HPOToolBase {
         <<abstract>>
-        +adapter: ModelAdapterBase
+        +eval_fn: Callable
         +_run(n_trials: int, trial_history: list) list
     }
 
@@ -831,15 +701,11 @@ classDiagram
 
     HPOAgent --> HPOConfig : uses
     HPOAgent --> Supervisor : builds
-    HPOAgent --> ModelAdapterBase : resolves
     HPOAgent --> LLMProviderBase : resolves
 
     LLMProviderBase <|-- GoogleLLMProvider : implements
     LLMProviderBase <|-- OpenAILLMProvider : implements
     LLMProviderBase <|-- AnthropicLLMProvider : implements
-    ModelAdapterBase <|-- LightGBMAdapter : implements
-    ModelAdapterBase <|-- SklearnAdapter : implements
-    ModelAdapterBase <|-- PyTorchAdapter : implements
     HPOToolBase <|-- BayesianOptimizationTool : implements
     HPOToolBase <|-- SobolSearchTool : implements
     HPOToolBase <|-- ExpertAgentTool : implements
@@ -850,8 +716,6 @@ classDiagram
     Supervisor --> ReportGenerator : uses
     Supervisor --> HPOResult : returns
 
-    HPOToolBase --> ModelAdapterBase : depends on
-    ModelAdapterBase --> ParamSpace : returns
     ParamSpace --> ParamSpec : contains
     HPOToolBase --> TrialRecord : produces
     ReportGenerator --> TrialRecord : reads
@@ -869,7 +733,7 @@ classDiagram
 | `langchain-anthropic` | Anthropic Claude LLM クライアント | `AnthropicLLMProvider` |
 | `optuna` | ベイズ最適化（TPE サンプラー） | `BayesianOptimizationTool` |
 | `scipy` | Sobol 列生成（`scipy.stats.qmc.Sobol`） | `SobolSearchTool` |
-| `lightgbm` | LightGBM モデル評価 | `LightGBMAdapter` |
+| `lightgbm` | LightGBM モデル評価（ユーザーの eval_fn 内で使用） | — |
 | `pandas` | 試行履歴 DataFrame 生成 | `HPOResult.trials_df` |
 | `pydantic` | LangGraph 状態スキーマ定義 | `SupervisorState` |
 | `python-dotenv` | `.env` からの環境変数読み込み | `HPOAgent._resolve_llm_provider()` |
@@ -884,9 +748,9 @@ classDiagram
 | パラメーター空間の優先順位 | `HPOConfig.param_space` が指定されている場合は LLM 自動生成をスキップし、ユーザー指定の `ParamSpace` を使用する | `HPOAgent.run()` |
 | LLM パラメーター空間自動生成 | `param_space=None` の場合、HPO 開始前に LLM がモデルクラス名・`eval_fn` ソースコード・試行回数を受け取り `ParamSpaceSchema` として探索空間を生成する | `HPOAgent._generate_param_space()` |
 | AI 判断理由の記録 | Supervisor のツール選択理由は `SupervisorState.last_tool_reasoning` に保持し、`TrialRecord.reasoning` へ転記する。ExpertAgentTool のパラメーター提案理由は `TrialRecord.reasoning` に直接記録する | `Supervisor._build_graph()`, `ExpertAgentTool._run()` |
-| eval_fn のシグネチャ | `eval_fn(model, X, y) -> float` を基本とするが、将来的に任意引数を許容する設計にする | `ModelAdapterBase.evaluate()` |
+| eval_fn のシグネチャ | `eval_fn(params: dict) -> float` に統一。ユーザーがクロージャ等で必要なデータ（X_train, y_train 等）を取り込む | `HPOToolBase._run()` |
 | プロンプト結合ルール | デフォルトシステムプロンプト + ユーザープロンプトを文字列連結で渡す。結合順序は必ずデフォストが先 | `Supervisor.__init__()`, `ExpertAgentTool.__init__()` |
-| LightGBM パラメータ空間 | LightGBM のデフォルト空間は廃止。`param_space` 未指定時は LLM が自動生成する（全モデル統一の方針） | `HPOAgent._generate_param_space()` |
+| LLM パラメータ空間自動生成 | `param_space` 未指定時は LLM が `eval_fn` のソースコード・試行回数をもとに探索空間を自動生成する | `HPOAgent._generate_param_space()` |
 | 同期実行の保証 | `HPOAgent.run()` は同期ブロッキングとする。LangGraph の非同期 API は使用しない（将来拡張への考慮のみ） | `HPOAgent.run()` |
 | ログ出力 | 各試行の実行後に試行番号・スコア・評価時間・パラメータを `logging.INFO` で出力する。ツール完了時にはツール名・試行数・最良スコア・中間レポートを `logging.INFO` で出力する | `HPOToolBase._run()`, `Supervisor._tool_executor_node()` |
 | 中間レポートの出力タイミング | ツール実行が完了し `SupervisorState` が更新されたタイミングで `_tool_executor_node()` 内から `ReportGenerator.generate_intermediate()` を直接呼び出す。LLM を使用しないため低コスト | `Supervisor._tool_executor_node()` |

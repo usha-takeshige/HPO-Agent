@@ -8,15 +8,12 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from hpo_agent.models import ParamSpace
-
-if TYPE_CHECKING:
-    from conftest import DummyAdapter
 
 pytestmark = pytest.mark.component
 
@@ -48,12 +45,12 @@ class TestOpenAILLMProvider:
         from hpo_agent.agent import HPOAgent
         from hpo_agent.providers import OpenAILLMProvider
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         monkeypatch.setenv("LLM_PROVIDER", "openai")
         monkeypatch.setenv("LLM_API_KEY", "sk-dummy")
         monkeypatch.setenv("LLM_MODEL_NAME", "gpt-4o")
 
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5)
         provider = agent._resolve_llm_provider()
         assert isinstance(provider, OpenAILLMProvider)
 
@@ -63,12 +60,12 @@ class TestOpenAILLMProvider:
         """未サポートの LLM_PROVIDER 値で ValueError が送出される。"""
         from hpo_agent.agent import HPOAgent
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         monkeypatch.setenv("LLM_PROVIDER", "unknown_provider")
         monkeypatch.setenv("LLM_API_KEY", "dummy")
         monkeypatch.setenv("LLM_MODEL_NAME", "dummy-model")
 
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5)
         with pytest.raises(ValueError, match="Unsupported LLM_PROVIDER"):
             agent._resolve_llm_provider()
 
@@ -102,12 +99,12 @@ class TestAnthropicLLMProvider:
         from hpo_agent.agent import HPOAgent
         from hpo_agent.providers import AnthropicLLMProvider
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         monkeypatch.setenv("LLM_PROVIDER", "anthropic")
         monkeypatch.setenv("LLM_API_KEY", "sk-ant-dummy")
         monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
 
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5)
         provider = agent._resolve_llm_provider()
         assert isinstance(provider, AnthropicLLMProvider)
 
@@ -117,12 +114,12 @@ class TestAnthropicLLMProvider:
         """未サポートの LLM_PROVIDER 値で ValueError が送出される。"""
         from hpo_agent.agent import HPOAgent
 
-        model, eval_fn, X, y = lgbm_binary_setup
+        eval_fn, X, y = lgbm_binary_setup
         monkeypatch.setenv("LLM_PROVIDER", "unknown_provider")
         monkeypatch.setenv("LLM_API_KEY", "dummy")
         monkeypatch.setenv("LLM_MODEL_NAME", "dummy-model")
 
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5)
         with pytest.raises(ValueError, match="Unsupported LLM_PROVIDER"):
             agent._resolve_llm_provider()
 
@@ -255,45 +252,19 @@ class TestTrialRecord:
 
 
 # ---------------------------------------------------------------------------
-# CMP-24: LightGBMAdapter
-# ---------------------------------------------------------------------------
-
-
-class TestLightGBMAdapter:
-    def test_evaluate_does_not_mutate_model(self, lgbm_binary_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-24: evaluate() 後に元モデルのパラメータが変化しない（deepcopy 確認）."""
-        from hpo_agent.adapters import LightGBMAdapter
-
-        model, eval_fn, X, y = lgbm_binary_setup
-        params_before = model.get_params().copy()
-        adapter = LightGBMAdapter(model=model, eval_fn=eval_fn, X=X, y=y)
-        adapter.evaluate({"num_leaves": 64, "n_estimators": 10})
-        assert model.get_params() == params_before
-
-    def test_get_default_param_space_raises(self, lgbm_binary_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-24b: get_default_param_space() は NotImplementedError を送出する（LLM が自動生成）。"""
-        from hpo_agent.adapters import LightGBMAdapter
-
-        model, eval_fn, X, y = lgbm_binary_setup
-        adapter = LightGBMAdapter(model=model, eval_fn=eval_fn, X=X, y=y)
-        with pytest.raises(NotImplementedError):
-            adapter.get_default_param_space()
-
-
-# ---------------------------------------------------------------------------
 # CMP-10/11/12/13: SobolSearchTool
 # ---------------------------------------------------------------------------
 
 
 class TestSobolSearchTool:
     def test_returns_correct_trial_count(
-        self, dummy_adapter: DummyAdapter, simple_param_space: ParamSpace
+        self, dummy_eval_fn: Any, simple_param_space: ParamSpace
     ) -> None:
         """CMP-10: 指定した試行回数の TrialRecord が返る."""
         from hpo_agent.tools import SobolSearchTool
 
         tool = SobolSearchTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=0,
             name="sobol_search",
@@ -303,13 +274,13 @@ class TestSobolSearchTool:
         assert len(results) == 4
 
     def test_eval_duration_positive(
-        self, dummy_adapter: DummyAdapter, simple_param_space: ParamSpace
+        self, dummy_eval_fn: Any, simple_param_space: ParamSpace
     ) -> None:
-        """CMP-11: eval_duration が計測される（DummyAdapter は sleep(0.001) を含む）."""
+        """CMP-11: eval_duration が計測される（dummy_eval_fn は sleep(0.001) を含む）."""
         from hpo_agent.tools import SobolSearchTool
 
         tool = SobolSearchTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=0,
             name="sobol_search",
@@ -319,13 +290,13 @@ class TestSobolSearchTool:
         assert all(r.eval_duration > 0 for r in results)
 
     def test_params_within_bounds(
-        self, dummy_adapter: DummyAdapter, simple_param_space: ParamSpace
+        self, dummy_eval_fn: Any, simple_param_space: ParamSpace
     ) -> None:
         """CMP-12: 生成パラメータが ParamSpec の範囲内."""
         from hpo_agent.tools import SobolSearchTool
 
         tool = SobolSearchTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=0,
             name="sobol_search",
@@ -337,13 +308,13 @@ class TestSobolSearchTool:
             assert 0.01 <= r.params["learning_rate"] <= 0.3
 
     def test_categorical_within_choices(
-        self, dummy_adapter: DummyAdapter, simple_param_space: ParamSpace
+        self, dummy_eval_fn: Any, simple_param_space: ParamSpace
     ) -> None:
         """CMP-13: categorical パラメータが choices の中から選ばれる."""
         from hpo_agent.tools import SobolSearchTool
 
         tool = SobolSearchTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=0,
             name="sobol_search",
@@ -361,13 +332,13 @@ class TestSobolSearchTool:
 
 class TestBayesianOptimizationTool:
     def test_returns_correct_trial_count(
-        self, dummy_adapter: DummyAdapter, simple_param_space: ParamSpace
+        self, dummy_eval_fn: Any, simple_param_space: ParamSpace
     ) -> None:
         """CMP-08: 指定した試行回数の TrialRecord が返る."""
         from hpo_agent.tools import BayesianOptimizationTool
 
         tool = BayesianOptimizationTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=0,
             name="bayesian_optimization",
@@ -377,13 +348,13 @@ class TestBayesianOptimizationTool:
         assert len(results) == 3
 
     def test_algo_duration_non_negative(
-        self, dummy_adapter: DummyAdapter, simple_param_space: ParamSpace
+        self, dummy_eval_fn: Any, simple_param_space: ParamSpace
     ) -> None:
         """CMP-09: algo_duration が記録される."""
         from hpo_agent.tools import BayesianOptimizationTool
 
         tool = BayesianOptimizationTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=0,
             name="bayesian_optimization",
@@ -401,7 +372,7 @@ class TestBayesianOptimizationTool:
 class TestExpertAgentTool:
     def test_params_from_llm_used_for_evaluation(
         self,
-        dummy_adapter: DummyAdapter,
+        dummy_eval_fn: Any,
         simple_param_space: ParamSpace,
         mock_expert_llm: MagicMock,
     ) -> None:
@@ -409,7 +380,7 @@ class TestExpertAgentTool:
         from hpo_agent.tools import ExpertAgentTool
 
         tool = ExpertAgentTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             llm=mock_expert_llm,
             system_prompt="test",
@@ -421,7 +392,7 @@ class TestExpertAgentTool:
 
     def test_reasoning_stored_in_trial_record(
         self,
-        dummy_adapter: DummyAdapter,
+        dummy_eval_fn: Any,
         simple_param_space: ParamSpace,
         mock_expert_llm: MagicMock,
     ) -> None:
@@ -429,7 +400,7 @@ class TestExpertAgentTool:
         from hpo_agent.tools import ExpertAgentTool
 
         tool = ExpertAgentTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             llm=mock_expert_llm,
             system_prompt="test",
@@ -441,7 +412,7 @@ class TestExpertAgentTool:
 
     def test_retry_succeeds_on_third_attempt(
         self,
-        dummy_adapter: DummyAdapter,
+        dummy_eval_fn: Any,
         simple_param_space: ParamSpace,
         mock_expert_llm: MagicMock,
     ) -> None:
@@ -458,7 +429,7 @@ class TestExpertAgentTool:
             ),
         ]
         tool = ExpertAgentTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             llm=mock_expert_llm,
             system_prompt="test",
@@ -471,7 +442,7 @@ class TestExpertAgentTool:
 
     def test_all_retries_fail_raises(
         self,
-        dummy_adapter: DummyAdapter,
+        dummy_eval_fn: Any,
         simple_param_space: ParamSpace,
         mock_expert_llm: MagicMock,
     ) -> None:
@@ -480,7 +451,7 @@ class TestExpertAgentTool:
 
         mock_expert_llm.invoke.return_value.content = "not json"
         tool = ExpertAgentTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             llm=mock_expert_llm,
             system_prompt="test",
@@ -492,7 +463,7 @@ class TestExpertAgentTool:
 
     def test_algo_duration_positive(
         self,
-        dummy_adapter: DummyAdapter,
+        dummy_eval_fn: Any,
         simple_param_space: ParamSpace,
         mock_expert_llm: MagicMock,
     ) -> None:
@@ -500,7 +471,7 @@ class TestExpertAgentTool:
         from hpo_agent.tools import ExpertAgentTool
 
         tool = ExpertAgentTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             llm=mock_expert_llm,
             system_prompt="test",
@@ -628,7 +599,7 @@ class TestReportGenerator:
 
 
 # ---------------------------------------------------------------------------
-# CMP-01/02/03/04/05/25/26: HPOAgent
+# CMP-01/02/03/04/05: HPOAgent
 # ---------------------------------------------------------------------------
 
 
@@ -637,24 +608,24 @@ class TestHPOAgent:
         """CMP-01: 必須引数で正常に初期化される."""
         from hpo_agent.agent import HPOAgent
 
-        model, eval_fn, X, y = lgbm_binary_setup
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5)
         assert agent is not None
 
     def test_seed_stored_in_config(self, lgbm_binary_setup) -> None:  # type: ignore[no-untyped-def]
         """CMP-02: seed=42 を渡すと config.seed に設定される."""
         from hpo_agent.agent import HPOAgent
 
-        model, eval_fn, X, y = lgbm_binary_setup
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y, seed=42)
+        eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5, seed=42)
         assert agent._config.seed == 42
 
     def test_seed_default_none(self, lgbm_binary_setup) -> None:  # type: ignore[no-untyped-def]
         """CMP-03: seed 省略時は None になる."""
         from hpo_agent.agent import HPOAgent
 
-        model, eval_fn, X, y = lgbm_binary_setup
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
+        eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5)
         assert agent._config.seed is None
 
     def test_run_returns_hpo_result(
@@ -664,50 +635,39 @@ class TestHPOAgent:
         simple_param_space,  # type: ignore[no-untyped-def]
     ) -> None:
         """CMP-04: run() が HPOResult 型を返す（MockSupervisorLLM 使用）."""
-        from unittest.mock import patch
+        from unittest.mock import MagicMock, patch
 
         from hpo_agent.agent import HPOAgent
         from hpo_agent.models import HPOResult
-
-        model, eval_fn, X, y = lgbm_binary_setup
-        agent = HPOAgent(
-            model=model,
-            eval_fn=eval_fn,
-            n_trials=5,
-            X=X,
-            y=y,
-            param_space=simple_param_space,
+        from hpo_agent.report import ReportGenerator
+        from hpo_agent.supervisor import Supervisor
+        from hpo_agent.tools import (
+            BayesianOptimizationTool,
+            ExpertAgentTool,
+            SobolSearchTool,
         )
 
+        eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5, param_space=simple_param_space)
+
         with patch.object(agent, "_build_supervisor") as mock_build:
-            from unittest.mock import MagicMock
-
-            from hpo_agent.report import ReportGenerator
-            from hpo_agent.supervisor import Supervisor
-            from hpo_agent.tools import (
-                BayesianOptimizationTool,
-                ExpertAgentTool,
-                SobolSearchTool,
-            )
-
-            adapter_instance = agent._resolve_adapter()[0]
             supervisor = Supervisor(
                 llm=mock_supervisor_llm,
                 tools=[
                     SobolSearchTool(
-                        adapter=adapter_instance,
+                        eval_fn=eval_fn,
                         param_space=simple_param_space,
                         name="sobol_search",
                         description="test",
                     ),
                     BayesianOptimizationTool(
-                        adapter=adapter_instance,
+                        eval_fn=eval_fn,
                         param_space=simple_param_space,
                         name="bayesian_optimization",
                         description="test",
                     ),
                     ExpertAgentTool(
-                        adapter=adapter_instance,
+                        eval_fn=eval_fn,
                         param_space=simple_param_space,
                         llm=MagicMock(),
                         system_prompt="test",
@@ -741,35 +701,27 @@ class TestHPOAgent:
             SobolSearchTool,
         )
 
-        model, eval_fn, X, y = lgbm_binary_setup
-        agent = HPOAgent(
-            model=model,
-            eval_fn=eval_fn,
-            n_trials=5,
-            X=X,
-            y=y,
-            param_space=simple_param_space,
-        )
+        eval_fn, X, y = lgbm_binary_setup
+        agent = HPOAgent(eval_fn=eval_fn, n_trials=5, param_space=simple_param_space)
 
         with patch.object(agent, "_build_supervisor") as mock_build:
-            adapter_instance = agent._resolve_adapter()[0]
             supervisor = Supervisor(
                 llm=mock_supervisor_llm,
                 tools=[
                     SobolSearchTool(
-                        adapter=adapter_instance,
+                        eval_fn=eval_fn,
                         param_space=simple_param_space,
                         name="sobol_search",
                         description="test",
                     ),
                     BayesianOptimizationTool(
-                        adapter=adapter_instance,
+                        eval_fn=eval_fn,
                         param_space=simple_param_space,
                         name="bayesian_optimization",
                         description="test",
                     ),
                     ExpertAgentTool(
-                        adapter=adapter_instance,
+                        eval_fn=eval_fn,
                         param_space=simple_param_space,
                         llm=MagicMock(),
                         system_prompt="test",
@@ -793,137 +745,6 @@ class TestHPOAgent:
                 "reasoning",
             }
             assert required_cols.issubset(set(result.trials_df.columns))
-
-    def test_user_param_space_priority(self, lgbm_binary_setup, simple_param_space) -> None:  # type: ignore[no-untyped-def]
-        """CMP-25: ユーザー指定 param_space がアダプターのデフォルトより優先される."""
-        from hpo_agent.agent import HPOAgent
-
-        model, eval_fn, X, y = lgbm_binary_setup
-        agent = HPOAgent(
-            model=model,
-            eval_fn=eval_fn,
-            n_trials=5,
-            X=X,
-            y=y,
-            param_space=simple_param_space,
-        )
-        _, resolved_space = agent._resolve_adapter()
-        assert resolved_space == simple_param_space
-
-    def test_unsupported_model_raises_type_error(self, lgbm_binary_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-26: 未対応モデル型で TypeError."""
-        from hpo_agent.agent import HPOAgent
-
-        _, eval_fn, X, y = lgbm_binary_setup
-        agent = HPOAgent(
-            model=object(),
-            eval_fn=eval_fn,
-            n_trials=5,
-            X=X,
-            y=y,
-        )
-        with pytest.raises(TypeError):
-            agent._resolve_adapter()
-
-
-# ---------------------------------------------------------------------------
-# SklearnAdapter（CMP-27〜29）
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.component
-class TestSklearnAdapter:
-    """SklearnAdapter のコンポーネントテスト。"""
-
-    def test_evaluate_does_not_mutate_model(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-27: evaluate() 後に元モデルが fit されていない（clone 確認）。"""
-        from hpo_agent.adapters import SklearnAdapter
-
-        model, eval_fn, X, y = sklearn_binary_setup
-        adapter = SklearnAdapter(model=model, eval_fn=eval_fn, X=X, y=y)
-        assert not hasattr(model, "estimators_")  # fit 前は estimators_ なし
-        adapter.evaluate({"n_estimators": 5})
-        assert not hasattr(model, "estimators_")  # evaluate 後も元モデルは未学習
-
-    def test_get_default_param_space_raises(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-28: get_default_param_space() は NotImplementedError を送出する。"""
-        from hpo_agent.adapters import SklearnAdapter
-
-        model, eval_fn, X, y = sklearn_binary_setup
-        adapter = SklearnAdapter(model=model, eval_fn=eval_fn, X=X, y=y)
-        with pytest.raises(NotImplementedError):
-            adapter.get_default_param_space()
-
-    def test_resolve_adapter_without_param_space_returns_none(self, sklearn_binary_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-29: sklearn モデルで param_space を省略すると (adapter, None) が返る（ValueError なし）。"""
-        from hpo_agent.adapters import SklearnAdapter
-        from hpo_agent.agent import HPOAgent
-
-        model, eval_fn, X, y = sklearn_binary_setup
-        agent = HPOAgent(model=model, eval_fn=eval_fn, n_trials=5, X=X, y=y)
-        adapter, param_space = agent._resolve_adapter()
-        assert isinstance(adapter, SklearnAdapter)
-        assert param_space is None
-
-    def test_pytorch_model_fn_resolves_to_pytorch_adapter(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-30: callable な model_fn が PyTorchAdapter に解決される（param_space 不要）。"""
-        from hpo_agent.adapters import PyTorchAdapter
-        from hpo_agent.agent import HPOAgent
-
-        model_fn, eval_fn, _ = pytorch_setup
-        agent = HPOAgent(model=model_fn, eval_fn=eval_fn, n_trials=5)
-        adapter, _ = agent._resolve_adapter()
-        assert isinstance(adapter, PyTorchAdapter)
-
-    def test_pytorch_without_param_space_returns_none(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-31: PyTorch 使用時に param_space=None で (adapter, None) が返る（ValueError なし）。"""
-        from hpo_agent.adapters import PyTorchAdapter
-        from hpo_agent.agent import HPOAgent
-
-        model_fn, eval_fn, _ = pytorch_setup
-        agent = HPOAgent(model=model_fn, eval_fn=eval_fn, n_trials=5, param_space=None)
-        adapter, param_space = agent._resolve_adapter()
-        assert isinstance(adapter, PyTorchAdapter)
-        assert param_space is None
-
-
-# ---------------------------------------------------------------------------
-# PyTorchAdapter（CMP-32〜34）
-# ---------------------------------------------------------------------------
-
-
-class TestPyTorchAdapter:
-    def test_evaluate_returns_float(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-32: evaluate() が float を返す。"""
-        from hpo_agent.adapters import PyTorchAdapter
-
-        model_fn, eval_fn, _ = pytorch_setup
-        adapter = PyTorchAdapter(model_fn=model_fn, eval_fn=eval_fn)
-        result = adapter.evaluate({"hidden_size": 8})
-        assert isinstance(result, float)
-
-    def test_evaluate_calls_model_fn_with_params(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-33: evaluate() が model_fn をパラメータ付きで呼び出し、eval_fn に渡す。"""
-        import torch.nn as nn
-
-        from hpo_agent.adapters import PyTorchAdapter
-
-        model_fn, eval_fn, _ = pytorch_setup
-        params = {"hidden_size": 16}
-        adapter = PyTorchAdapter(model_fn=model_fn, eval_fn=eval_fn)
-        result = adapter.evaluate(params)
-        assert isinstance(result, float)
-        model = model_fn(params)
-        assert isinstance(model, nn.Module)
-
-    def test_get_default_param_space_raises(self, pytorch_setup) -> None:  # type: ignore[no-untyped-def]
-        """CMP-34: get_default_param_space() は NotImplementedError を送出する（LLM が自動生成）。"""
-        from hpo_agent.adapters import PyTorchAdapter
-
-        model_fn, eval_fn, _ = pytorch_setup
-        adapter = PyTorchAdapter(model_fn=model_fn, eval_fn=eval_fn)
-        with pytest.raises(NotImplementedError):
-            adapter.get_default_param_space()
 
 
 # ---------------------------------------------------------------------------
@@ -1065,7 +886,7 @@ class TestChangeSearchSpaceTool:
         assert lr_spec.high == 0.3
 
     def test_sobol_uses_effective_param_space(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """CMP-41: SobolSearchTool に effective_param_space を渡すと指定した範囲内でサンプリング."""
         from hpo_agent.models import ParamSpace, ParamSpec
@@ -1081,7 +902,7 @@ class TestChangeSearchSpaceTool:
             )
         )
         tool = SobolSearchTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=0,
             name="sobol_search",
@@ -1096,7 +917,7 @@ class TestChangeSearchSpaceTool:
             assert r.params["boosting_type"] == "gbdt"
 
     def test_sobol_uses_expanded_param_space(
-        self, dummy_adapter: Any, simple_param_space: Any
+        self, dummy_eval_fn: Any, simple_param_space: Any
     ) -> None:
         """CMP-42: 拡大した空間を渡すと元の上限を超える範囲でもサンプリングされる."""
         from hpo_agent.models import ParamSpace, ParamSpec
@@ -1117,7 +938,7 @@ class TestChangeSearchSpaceTool:
             )
         )
         tool = SobolSearchTool(
-            adapter=dummy_adapter,
+            eval_fn=dummy_eval_fn,
             param_space=simple_param_space,
             seed=0,
             name="sobol_search",

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 import pathlib
-from typing import Any
 
 from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier
@@ -40,25 +39,6 @@ PARAM_SPACE = ParamSpace(
 
 
 # ---------------------------------------------------------------------------
-# 評価関数
-# ---------------------------------------------------------------------------
-
-
-def eval_fn(model: RandomForestClassifier, X: Any, y: Any) -> float:
-    """ホールドアウト精度を返す評価関数。
-
-    Args:
-        model: 学習済み RandomForestClassifier。
-        X: 特徴量。
-        y: ターゲット。
-
-    Returns:
-        accuracy_score（0.0〜1.0、高いほど良い）。
-    """
-    return float(accuracy_score(y, model.predict(X)))
-
-
-# ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 
@@ -80,16 +60,16 @@ def main() -> None:
     )
     print(f"Train: {len(X_train)} samples, Val: {len(X_val)} samples\n")
 
-    # ベースモデル
-    model = RandomForestClassifier(random_state=42)
+    def eval_fn(params: dict) -> float:
+        """パラメータを受け取りホールドアウト精度を返す評価関数。"""
+        model = RandomForestClassifier(random_state=42, **params)
+        model.fit(X_train, y_train)
+        return float(accuracy_score(y_train, model.predict(X_train)))
 
     # HPOAgent 実行（sklearn モデルは param_space の指定が必須）
     agent = HPOAgent(
-        model=model,
         eval_fn=eval_fn,
         n_trials=20,
-        X=X_train,
-        y=y_train,
         param_space=PARAM_SPACE,
         seed=42,
     )

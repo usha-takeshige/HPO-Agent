@@ -1,5 +1,11 @@
 # モデルアダプター設計書
 
+> **⚠️ 廃止済みドキュメント**
+>
+> モデルアダプター層（`ModelAdapterBase` / `LightGBMAdapter` / `SklearnAdapter` / `PyTorchAdapter`）は廃止されました。
+> `eval_fn: (params: dict) -> float` インターフェースに一本化されたため、このドキュメントは参照のみを目的として保持しています。
+> 最新の設計については `/doc/impl_design.md` を参照してください。
+
 **参照ファイル**：`/doc/requirements.md`, `/doc/impl_design.md`
 
 ---

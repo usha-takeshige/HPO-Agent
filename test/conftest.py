@@ -7,6 +7,7 @@ LLM 呼び出しは必ずここで定義したモックに置き換え、API キ
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 from unittest.mock import MagicMock
@@ -14,34 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage
 
-from hpo_agent.adapters import ModelAdapterBase
 from hpo_agent.models import ParamSpace, ParamSpec, SearchSpaceChangeRecord, TrialRecord
-
-# ---------------------------------------------------------------------------
-# DummyAdapter（全テストで共用）
-# ---------------------------------------------------------------------------
-
-
-class DummyAdapter(ModelAdapterBase):
-    """テスト用の軽量アダプター。
-
-    evaluate() は固定スコア 0.85 を返す。
-    sleep(0.001) を挿入して eval_duration > 0 を保証する。
-    """
-
-    def __init__(self, param_space: ParamSpace) -> None:
-        """DummyAdapter を初期化する。"""
-        self._param_space = param_space
-
-    def get_default_param_space(self) -> ParamSpace:
-        """テスト用パラメータ空間を返す。"""
-        return self._param_space
-
-    def evaluate(self, params: dict[str, Any]) -> float:
-        """固定スコア 0.85 を返す（eval_duration > 0 を保証するため sleep を挿入）。"""
-        time.sleep(0.001)
-        return 0.85
-
 
 # ---------------------------------------------------------------------------
 # Fixtures: パラメータ空間・試行履歴
@@ -114,28 +88,32 @@ def mock_expert_llm() -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# Fixtures: アダプター
+# Fixtures: eval_fn
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def dummy_adapter(simple_param_space: ParamSpace) -> DummyAdapter:
-    """DummyAdapter フィクスチャ（simple_param_space を使用）。"""
-    return DummyAdapter(param_space=simple_param_space)
+def dummy_eval_fn() -> Callable[[dict[str, Any]], float]:
+    """テスト用の軽量評価関数。固定スコア 0.85 を返す。
 
+    sleep(0.001) を挿入して eval_duration > 0 を保証する。
+    """
 
-# ---------------------------------------------------------------------------
-# Fixtures: 確定的評価関数
-# ---------------------------------------------------------------------------
+    def _eval_fn(params: dict[str, Any]) -> float:
+        """固定スコア 0.85 を返す（eval_duration > 0 を保証するため sleep を挿入）。"""
+        time.sleep(0.001)
+        return 0.85
+
+    return _eval_fn
 
 
 @pytest.fixture
-def deterministic_eval_fn():  # type: ignore[no-untyped-def]
+def deterministic_eval_fn() -> Callable[[dict[str, Any]], float]:
     """num_leaves=64 付近で最大スコアを持つ確定的な2次関数。"""
 
-    def eval_fn(model: Any, X: Any, y: Any) -> float:
+    def eval_fn(params: dict[str, Any]) -> float:
         """評価関数: -(num_leaves - 64)^2 / 10000 + 0.9."""
-        num_leaves = model.get_params().get("num_leaves", 50)
+        num_leaves = params.get("num_leaves", 50)
         return -((num_leaves - 64) ** 2) / 10000 + 0.9
 
     return eval_fn
@@ -184,56 +162,57 @@ def change_search_space_tool(simple_param_space: ParamSpace) -> Any:
 
 
 @pytest.fixture
-def lgbm_binary_setup():  # type: ignore[no-untyped-def]
+def lgbm_binary_setup() -> tuple[Callable[[dict[str, Any]], float], Any, Any]:  # type: ignore[no-untyped-def]
     """軽量な LightGBM 二値分類のセットアップ。"""
     import lightgbm as lgb
     from sklearn.datasets import make_classification
     from sklearn.metrics import accuracy_score
 
     X, y = make_classification(n_samples=200, n_features=5, random_state=42)
-    model = lgb.LGBMClassifier(verbosity=-1, n_estimators=5)
 
-    def eval_fn(m: Any, X: Any, y: Any) -> float:
-        """精度を評価関数として返す。"""
-        return float(accuracy_score(y, m.predict(X)))
+    def eval_fn(params: dict[str, Any]) -> float:
+        """LightGBM モデルを学習・評価して精度を返す。"""
+        model = lgb.LGBMClassifier(verbosity=-1, n_estimators=5, **params)
+        model.fit(X, y)
+        return float(accuracy_score(y, model.predict(X)))
 
-    return model, eval_fn, X, y
+    return eval_fn, X, y
 
 
 # ---------------------------------------------------------------------------
-# Fixtures: sklearn セットアップ（CMP-27〜29 テスト用）
+# Fixtures: sklearn セットアップ（テスト用）
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def sklearn_binary_setup():  # type: ignore[no-untyped-def]
+def sklearn_binary_setup() -> tuple[Callable[[dict[str, Any]], float], Any, Any]:  # type: ignore[no-untyped-def]
     """軽量な sklearn RandomForestClassifier 二値分類のセットアップ。"""
     from sklearn.datasets import make_classification
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.metrics import accuracy_score
 
     X, y = make_classification(n_samples=200, n_features=5, random_state=42)
-    model = RandomForestClassifier(n_estimators=5, random_state=42)
 
-    def eval_fn(m: Any, X: Any, y: Any) -> float:
-        """精度を評価関数として返す。"""
-        return float(accuracy_score(y, m.predict(X)))
+    def eval_fn(params: dict[str, Any]) -> float:
+        """RandomForestClassifier モデルを学習・評価して精度を返す。"""
+        model = RandomForestClassifier(random_state=42, **params)
+        model.fit(X, y)
+        return float(accuracy_score(y, model.predict(X)))
 
-    return model, eval_fn, X, y
+    return eval_fn, X, y
 
 
 # ---------------------------------------------------------------------------
-# Fixtures: PyTorch セットアップ（CMP-30〜34 テスト用）
+# Fixtures: PyTorch セットアップ（テスト用）
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def pytorch_setup() -> tuple[Any, Any, ParamSpace]:
+def pytorch_setup() -> tuple[Callable[[dict[str, Any]], float], ParamSpace]:
     """実際の torch.nn.Module を使った軽量 PyTorch セットアップ。
 
     SimpleNet は Linear 層1つの最小構成。
     eval_fn は学習なしの forward pass でスコアを返す（テストの高速化のため）。
-    param_space は HPOAgent に渡す用途で返すが、PyTorchAdapter のコンストラクタには渡さない。
     """
     import torch
     import torch.nn as nn
@@ -250,12 +229,9 @@ def pytorch_setup() -> tuple[Any, Any, ParamSpace]:
             """forward パスを実行する。"""
             return self.fc(x)
 
-    def model_fn(params: dict[str, Any]) -> nn.Module:
-        """パラメータを受け取り SimpleNet を返すファクトリ関数。"""
-        return SimpleNet(hidden_size=int(params["hidden_size"]))
-
-    def eval_fn(model: nn.Module) -> float:
-        """forward pass の出力絶対値平均をスコアとして返す。"""
+    def eval_fn(params: dict[str, Any]) -> float:
+        """params から SimpleNet を構築し、forward pass の出力絶対値平均をスコアとして返す。"""
+        model = SimpleNet(hidden_size=int(params["hidden_size"]))
         x = torch.randn(5, 10)
         with torch.no_grad():
             out = model(x)
@@ -264,7 +240,7 @@ def pytorch_setup() -> tuple[Any, Any, ParamSpace]:
     param_space = ParamSpace(
         specs=(ParamSpec(name="hidden_size", type="int", low=4, high=32),)
     )
-    return model_fn, eval_fn, param_space
+    return eval_fn, param_space
 
 
 @pytest.fixture
